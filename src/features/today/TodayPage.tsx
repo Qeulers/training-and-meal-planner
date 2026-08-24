@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { TabScaffold } from '@/components/TabScaffold';
 import { Card, Eyebrow, Heading, Badge, Button, Chip, QueryBoundary } from '@/components/ui';
 import { Icon } from '@/components/Icon';
@@ -9,14 +10,24 @@ import {
   useSaunaTypes,
   useSaunaSchedule,
   useExercises,
+  useRecipes,
 } from '@/data/reference';
-import { useRaces, useUserSettings, useWorkoutLogs, useSaunaLogs } from '@/data/user';
+import {
+  useRaces,
+  useUserSettings,
+  useWorkoutLogs,
+  useSaunaLogs,
+  useMealPlan,
+  useAllSets,
+} from '@/data/user';
 import { formatDate, daysBetween } from '@/domain/dates';
 import { phase, type PhaseOverride, type PhaseSlug } from '@/domain/phase';
 import { sessionsFor, type SessionTemplate } from '@/domain/schedule';
 import { saunaFor } from '@/domain/sauna';
 import { WorkoutLogger } from './WorkoutLogger';
 import { LogSaunaButton, AdHocSaunaLog } from './SaunaLog';
+
+const HEAT_ICONS = ['', '🌶', '🌶🌶', '🌶🌶🌶'];
 
 export function TodayPage() {
   const today = formatDate(new Date());
@@ -35,6 +46,9 @@ export function TodayPage() {
   const settings = useUserSettings();
   const workoutLogs = useWorkoutLogs();
   const saunaLogs = useSaunaLogs();
+  const recipes = useRecipes();
+  const mealPlan = useMealPlan();
+  const allSets = useAllSets();
 
   const [logging, setLogging] = useState<SessionTemplate | null>(null);
 
@@ -52,6 +66,9 @@ export function TodayPage() {
           settings,
           workoutLogs,
           saunaLogs,
+          recipes,
+          mealPlan,
+          allSets,
         ]}
       >
         {([
@@ -65,6 +82,9 @@ export function TodayPage() {
           userSettings,
           logList,
           saunaLogList,
+          recipeList,
+          mealPlanList,
+          setList,
         ]) => {
           const target = raceList.find((r) => r.is_target) ?? null;
           const raceDate = target?.race_date ?? null;
@@ -79,6 +99,12 @@ export function TodayPage() {
           const slots = saunaFor(today, { raceDate, schedule: scheduleList, override });
           const typeBy = new Map(typeList.map((t) => [t.slug, t]));
           const countdown = raceDate ? daysBetween(today, raceDate) : null;
+
+          // Tonight's planned dinner (glance into the meal plan; no new data).
+          const tonightEntry = mealPlanList.find((e) => e.plan_date === today);
+          const tonightRecipe = tonightEntry
+            ? (recipeList.find((r) => r.slug === tonightEntry.recipe_slug) ?? null)
+            : null;
 
           if (logging) {
             return (
@@ -139,9 +165,13 @@ export function TodayPage() {
                 </div>
               ) : (
                 sessions.map((s) => {
-                  const doneToday = logList.some(
+                  const todayLog = logList.find(
                     (l) => l.logged_on === today && l.session_key === s.session_key,
                   );
+                  const doneToday = !!todayLog;
+                  const recap = todayLog
+                    ? setList.filter((st) => st.workout_log_id === todayLog.id)
+                    : [];
                   const exs = itemList.filter((i) => i.session_template_slug === s.slug);
                   const chips = exs.slice(0, 4);
                   const moreCount = exs.length - chips.length;
@@ -168,9 +198,45 @@ export function TodayPage() {
                       </div>
                       <div className="mt-4">
                         {doneToday ? (
-                          <p className="flex items-center gap-1.5 text-body-sm font-bold text-success">
-                            <Icon name="check_circle" size={18} fill /> Logged today
-                          </p>
+                          <div>
+                            <p className="flex items-center gap-1.5 text-body-sm font-bold text-success">
+                              <Icon name="check_circle" size={18} fill /> Logged today
+                            </p>
+                            {recap.length > 0 && (
+                              <ul className="mt-2 space-y-1 border-t border-border pt-2">
+                                {exs.map((it) => {
+                                  const name =
+                                    exerciseList.find((e) => e.slug === it.exercise_slug)?.name ??
+                                    it.exercise_slug;
+                                  const exSets = recap
+                                    .filter((st) => st.exercise_slug === it.exercise_slug)
+                                    .sort((a, b) => a.set_no - b.set_no);
+                                  if (!exSets.length) return null;
+                                  const summary = exSets
+                                    .map((st) => `${st.weight_kg}×${st.reps}`)
+                                    .join(', ');
+                                  return (
+                                    <li
+                                      key={it.id}
+                                      className="flex items-baseline justify-between gap-3 text-body-sm"
+                                    >
+                                      <span className="min-w-0 truncate text-text">{name}</span>
+                                      <span className="shrink-0 tabular-nums text-text-dim">
+                                        {summary}
+                                      </span>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setLogging(s)}
+                              className="mt-3 text-body-sm font-bold text-accent transition-opacity hover:opacity-70"
+                            >
+                              Log again
+                            </button>
+                          </div>
                         ) : (
                           <Button full onClick={() => setLogging(s)}>
                             Start session <Icon name="north_east" size={18} />
@@ -231,6 +297,33 @@ export function TodayPage() {
                 )}
                 <AdHocSaunaLog types={typeList} />
               </div>
+
+              {/* Tonight's dinner — links into Food */}
+              {tonightRecipe && (
+                <div>
+                  <Eyebrow bullet className="mb-1">
+                    Tonight
+                  </Eyebrow>
+                  <Link
+                    to="/food"
+                    className="flex items-center gap-3 rounded-lg border border-border bg-surface p-4 transition-colors hover:border-border-strong"
+                  >
+                    <Icon name="restaurant" size={22} className="shrink-0 text-food" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-display text-body font-bold text-text">
+                        {tonightRecipe.name}
+                      </p>
+                      <p className="text-meta text-text-dim">
+                        {tonightRecipe.time_minutes} min · {tonightRecipe.diet_tag}
+                        {tonightRecipe.heat_level > 0
+                          ? ` ${HEAT_ICONS[tonightRecipe.heat_level]}`
+                          : ''}
+                      </p>
+                    </div>
+                    <Icon name="chevron_right" size={20} className="shrink-0 text-text-dim" />
+                  </Link>
+                </div>
+              )}
             </div>
           );
         }}

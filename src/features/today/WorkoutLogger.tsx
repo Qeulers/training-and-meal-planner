@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
-import { Button, Eyebrow } from '@/components/ui';
+import { Button, Eyebrow, Chip } from '@/components/ui';
 import { parseHold, prescribedSets } from '@/domain/prescription';
 import { formatDate } from '@/domain/dates';
 import { embedUrl } from '@/domain/youtube';
@@ -15,8 +15,8 @@ import {
 import type { SessionItem, Exercise } from '@/data/reference';
 import type { SessionTemplate } from '@/domain/schedule';
 import { CountdownTimer } from './CountdownTimer';
+import { SetKeypad, type EditField } from './SetKeypad';
 import { useWakeLock } from './useWakeLock';
-import { useKeyboardOpen } from './useKeyboardOpen';
 
 interface Props {
   session: SessionTemplate;
@@ -87,6 +87,13 @@ export function WorkoutLogger({ session, items, exercises, phaseSlug, onClose }:
   const [timer, setTimer] = useState<Timer | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [nextExpanded, setNextExpanded] = useState(false);
+  // Which set/field the custom keypad is editing (frame 1c); null = keypad closed.
+  const [editing, setEditing] = useState<{ slug: string; row: number; field: EditField } | null>(
+    null,
+  );
+  // The "set up while you rest" handoff (frame 8) — set only on a lift's final
+  // rest, pointing at the next exercise. Cleared when the timer clears.
+  const [handoff, setHandoff] = useState<{ nextIdx: number } | null>(null);
   const startRef = useRef(Date.now());
   const nonceRef = useRef(0);
   const sectionRefs = useRef<(HTMLElement | null)[]>([]);
@@ -94,14 +101,28 @@ export function WorkoutLogger({ session, items, exercises, phaseSlug, onClose }:
 
   // Keep the screen awake for the whole session, not just while a timer runs.
   useWakeLock(true);
-  // Hide the sticky rest timer while the soft keyboard is up — on mobile it
-  // otherwise sits on top of the weight/reps inputs.
-  const keyboardOpen = useKeyboardOpen();
 
   const startRest = (seconds: number, exerciseSlug?: string) =>
     setTimer({ kind: 'rest', seconds, exerciseSlug, nonce: ++nonceRef.current });
   const startHold = (seconds: number, perSide: boolean) =>
     setTimer({ kind: 'hold', seconds, perSide, nonce: ++nonceRef.current });
+  const clearTimer = () => {
+    setTimer(null);
+    setHandoff(null);
+  };
+  // next → advance the keypad: weight → reps → next set's weight → close.
+  const advanceEditing = () =>
+    setEditing((e) => {
+      if (!e) return e;
+      if (e.field === 'weight') return { ...e, field: 'reps' };
+      const rows = rowsFor(e.slug);
+      if (e.row + 1 < rows.length) return { slug: e.slug, row: e.row + 1, field: 'weight' };
+      return null;
+    });
+  const goNow = (nextIdx: number) => {
+    clearTimer();
+    sectionRefs.current[nextIdx]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   // Wall-clock elapsed ticker
   useEffect(() => {
@@ -322,17 +343,39 @@ export function WorkoutLogger({ session, items, exercises, phaseSlug, onClose }:
                     <div className="mt-3 space-y-2">
                       {rows.map((r, i) => {
                         const isActiveRow = isActive && !r.done && rows.slice(0, i).every((prev) => prev.done);
+                        const editingField =
+                          editing?.slug === it.exercise_slug && editing.row === i
+                            ? editing.field
+                            : null;
                         return (
                           <SetRow
                             key={i}
                             index={i}
                             row={r}
                             isActive={isActiveRow}
-                            onWeightChange={(v) => update(it.exercise_slug, i, { weight: v })}
-                            onRepsChange={(v) => update(it.exercise_slug, i, { reps: v })}
+                            editingField={editingField}
+                            onEditWeight={() =>
+                              setEditing({ slug: it.exercise_slug, row: i, field: 'weight' })
+                            }
+                            onEditReps={() =>
+                              setEditing({ slug: it.exercise_slug, row: i, field: 'reps' })
+                            }
                             onDone={() => {
-                              update(it.exercise_slug, i, { done: !r.done });
-                              if (!r.done) startRest(restFor(it.exercise_slug), it.exercise_slug);
+                              const willBeDone = !r.done;
+                              update(it.exercise_slug, i, { done: willBeDone });
+                              if (!willBeDone) return;
+                              // Close the keypad if it was editing this set.
+                              if (editing?.slug === it.exercise_slug && editing.row === i)
+                                setEditing(null);
+                              // Start rest (per-exercise override ?? default), and
+                              // auto-expand the handoff only on a lift's final rest.
+                              const rowsAfter = rows.map((rr, idx) =>
+                                idx === i ? { ...rr, done: true } : rr,
+                              );
+                              const allDone = rowsAfter.every((rr) => rr.done);
+                              const hasNext = itemIdx + 1 < items.length;
+                              startRest(restFor(it.exercise_slug), it.exercise_slug);
+                              setHandoff(allDone && hasNext ? { nextIdx: itemIdx + 1 } : null);
                             }}
                           />
                         );
@@ -415,51 +458,74 @@ export function WorkoutLogger({ session, items, exercises, phaseSlug, onClose }:
       </div>
 
       {/* ── Sticky bottom bar ── */}
-      {/* Hidden (not unmounted) while the soft keyboard is up so it doesn't cover
-          the inputs — display:none keeps the running timer's state alive. */}
-      <div
-        className={[
-          'fixed inset-x-0 bottom-0 z-40 border-t border-border bg-bg/95 backdrop-blur',
-          keyboardOpen ? 'hidden' : '',
-        ].join(' ')}
-      >
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-bg/95 backdrop-blur">
         <div className="mx-auto max-w-content">
-          {timer && (
-            <div
-              className={
-                timer.kind === 'rest'
-                  ? 'border-b-2 border-accent bg-surface-raised px-4 py-4 shadow-lg'
-                  : 'border-b border-border px-4 py-3'
+          {editing ? (
+            /* Custom set editor (frame 1c) — the OS keyboard never opens. */
+            <SetKeypad
+              key={`${editing.slug}-${editing.row}-${editing.field}`}
+              setLabel={`Set ${editing.row + 1}`}
+              field={editing.field}
+              value={rowsFor(editing.slug)[editing.row]?.[editing.field] ?? 0}
+              onChange={(v) =>
+                update(
+                  editing.slug,
+                  editing.row,
+                  editing.field === 'weight' ? { weight: v } : { reps: v },
+                )
               }
-            >
-              <CountdownTimer
-                key={timer.nonce}
-                seconds={timer.seconds}
-                kind={timer.kind}
-                perSide={timer.kind === 'hold' ? timer.perSide : false}
-                prominent={timer.kind === 'rest'}
-                onClose={() => setTimer(null)}
-                onDefaultChange={
-                  timer.kind === 'rest' && timer.exerciseSlug
-                    ? (seconds) => setRestOverride.mutate({ slug: timer.exerciseSlug!, seconds })
-                    : undefined
-                }
-              />
-            </div>
+              onNext={advanceEditing}
+              onDone={() => setEditing(null)}
+            />
+          ) : (
+            <>
+              {/* "Set up while you rest" handoff — only on a lift's final rest. */}
+              {handoff && timer?.kind === 'rest' && (
+                <HandoffCard
+                  index={handoff.nextIdx}
+                  total={items.length}
+                  name={nameBy.get(items[handoff.nextIdx].exercise_slug) ?? items[handoff.nextIdx].exercise_slug}
+                  prescription={items[handoff.nextIdx].prescription}
+                  lastTime={lastTimeFor(items[handoff.nextIdx].exercise_slug)}
+                  cues={exBy.get(items[handoff.nextIdx].exercise_slug)?.cues ?? []}
+                  onGoNow={() => goNow(handoff.nextIdx)}
+                  onCollapse={() => setHandoff(null)}
+                />
+              )}
+              {timer && (
+                <div className={timer.kind === 'hold' ? 'px-4 py-3' : ''}>
+                  <CountdownTimer
+                    key={timer.nonce}
+                    seconds={timer.seconds}
+                    kind={timer.kind}
+                    perSide={timer.kind === 'hold' ? timer.perSide : false}
+                    prominent={timer.kind === 'rest'}
+                    handoff={timer.kind === 'rest' && !!handoff}
+                    onClose={clearTimer}
+                    onDefaultChange={
+                      timer.kind === 'rest' && timer.exerciseSlug
+                        ? (seconds) =>
+                            setRestOverride.mutate({ slug: timer.exerciseSlug!, seconds })
+                        : undefined
+                    }
+                  />
+                </div>
+              )}
+              {!timer && (
+                <div className="flex items-center justify-between px-4 py-3">
+                  <p className="text-body-sm text-text-dim">Mark a set done to start rest</p>
+                  <button
+                    type="button"
+                    onClick={() => startHold(30, false)}
+                    className="flex items-center gap-1.5 rounded-md border border-border bg-surface px-4 py-2 font-body text-body-sm font-bold text-text transition-colors hover:border-border-strong"
+                  >
+                    <Icon name="timer" size={16} />
+                    Hold timer
+                  </button>
+                </div>
+              )}
+            </>
           )}
-          <div className="flex items-center justify-between px-4 py-3">
-            <p className="text-body-sm text-text-dim">
-              {timer ? null : 'Mark a set done to start rest'}
-            </p>
-            <button
-              type="button"
-              onClick={() => startHold(30, false)}
-              className="flex items-center gap-1.5 rounded-md border border-border bg-surface px-4 py-2 font-body text-body-sm font-bold text-text transition-colors hover:border-border-strong"
-            >
-              <Icon name="timer" size={16} />
-              Hold timer
-            </button>
-          </div>
         </div>
       </div>
     </div>
@@ -548,79 +614,175 @@ function WatchDemoRow({ videoUrl, cues }: { videoUrl: string; cues: string[] }) 
   );
 }
 
-/** A single set row: S1 chip, weight input, kg× separator, reps input, check button */
+/**
+ * A single set row. A completed set collapses to a read-only line
+ * (`72.5 kg × 5` + green check, frame 7); an editable set shows tappable
+ * weight / reps value boxes that open the custom keypad (frame 1c) — no native
+ * inputs, so the OS keyboard never opens.
+ */
 function SetRow({
   index,
   row,
   isActive,
-  onWeightChange,
-  onRepsChange,
+  editingField,
+  onEditWeight,
+  onEditReps,
   onDone,
 }: {
   index: number;
   row: Row;
   isActive: boolean;
-  onWeightChange: (v: number) => void;
-  onRepsChange: (v: number) => void;
+  editingField: EditField | null;
+  onEditWeight: () => void;
+  onEditReps: () => void;
   onDone: () => void;
 }) {
   const label = `S${index + 1}`;
+
+  // ── Completed: compact read-only line ──
+  if (row.done) {
+    return (
+      <div className="flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5 opacity-80">
+        <span className="w-7 flex-shrink-0 text-center font-display text-label font-semibold uppercase tracking-label text-text-dim">
+          {label}
+        </span>
+        <span className="font-body text-body font-bold tabular-nums text-text-muted">
+          {row.weight || '—'}
+          <span className="mx-1 text-body-sm font-normal text-text-dim">kg ×</span>
+          {row.reps || '—'}
+        </span>
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={onDone}
+          aria-label={`${label} completed — tap to undo`}
+          className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-md bg-accent text-accent-ink transition-opacity hover:opacity-80"
+        >
+          <Icon name="check_circle" size={20} fill />
+        </button>
+      </div>
+    );
+  }
+
+  // ── Editable: tappable value boxes ──
+  const box = (active: boolean) =>
+    [
+      'min-h-tap rounded-md border px-2 text-center font-body text-body font-bold transition-colors duration-fast ease-brand',
+      active ? 'border-accent text-text' : 'border-border bg-bg text-text hover:border-border-strong',
+    ].join(' ');
+
   return (
     <div
       className={[
         'flex items-center gap-2 rounded-lg border p-2 transition-colors duration-fast ease-brand',
         isActive ? 'border-accent' : 'border-border bg-surface',
-        row.done ? 'opacity-70' : '',
       ].join(' ')}
     >
-      {/* Set label chip */}
       <span className="w-7 flex-shrink-0 text-center font-display text-label font-semibold uppercase tracking-label text-text-dim">
         {label}
       </span>
 
-      {/* Weight input */}
-      <input
-        type="number"
-        inputMode="decimal"
-        step={2.5}
-        value={row.weight || ''}
-        placeholder="—"
-        aria-label={`${label} weight in kg`}
-        onChange={(e) => onWeightChange(Number(e.target.value) || 0)}
-        className="min-h-tap w-[4.5rem] rounded-md border border-border bg-bg px-2 text-center font-body text-body font-bold text-text placeholder:text-text-dim focus:border-accent focus:outline-none"
-      />
+      <button
+        type="button"
+        onClick={onEditWeight}
+        aria-label={`${label} weight in kg${row.weight ? `, ${row.weight}` : ''}`}
+        className={`${box(editingField === 'weight')} w-[4.5rem]`}
+      >
+        {row.weight || '—'}
+      </button>
 
-      {/* Separator */}
       <span className="flex-shrink-0 text-body-sm text-text-dim">kg ×</span>
 
-      {/* Reps input */}
-      <input
-        type="number"
-        inputMode="numeric"
-        value={row.reps || ''}
-        placeholder="—"
-        aria-label={`${label} reps`}
-        onChange={(e) => onRepsChange(Number(e.target.value) || 0)}
-        className="min-h-tap w-14 rounded-md border border-border bg-bg px-2 text-center font-body text-body font-bold text-text placeholder:text-text-dim focus:border-accent focus:outline-none"
-      />
+      <button
+        type="button"
+        onClick={onEditReps}
+        aria-label={`${label} reps${row.reps ? `, ${row.reps}` : ''}`}
+        className={`${box(editingField === 'reps')} w-14`}
+      >
+        {row.reps || '—'}
+      </button>
 
-      {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Done check button */}
       <button
         type="button"
         onClick={onDone}
-        aria-label={`${label} ${row.done ? 'completed — tap to undo' : 'mark done'}`}
-        className={[
-          'flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-md transition-colors duration-fast ease-brand',
-          row.done
-            ? 'bg-accent text-accent-ink'
-            : 'border border-border bg-surface text-text-dim hover:border-accent hover:text-accent',
-        ].join(' ')}
+        aria-label={`${label} mark done`}
+        className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-md border border-border bg-surface text-text-dim transition-colors duration-fast ease-brand hover:border-accent hover:text-accent"
       >
-        <Icon name="check_circle" size={20} fill={row.done} />
+        <Icon name="check_circle" size={20} />
       </button>
+    </div>
+  );
+}
+
+/**
+ * "Set up while you rest" handoff (frame 8). Auto-expands on a lift's final rest
+ * with the next exercise's details; "Go now" jumps to it, the chevron collapses
+ * back to the plain rest bar. Setup chips are the exercise's own cues — no new
+ * data field.
+ */
+function HandoffCard({
+  index,
+  total,
+  name,
+  prescription,
+  lastTime,
+  cues,
+  onGoNow,
+  onCollapse,
+}: {
+  index: number;
+  total: number;
+  name: string;
+  prescription: string;
+  lastTime: string | null;
+  cues: string[];
+  onGoNow: () => void;
+  onCollapse: () => void;
+}) {
+  return (
+    <div className="border-b border-border px-4 pt-3">
+      <div className="rounded-lg border border-accent bg-surface-raised p-3">
+        <div className="flex items-center justify-between">
+          <Eyebrow tone="accent">Set up while you rest</Eyebrow>
+          <span className="font-display text-label font-semibold uppercase tracking-label text-text-dim">
+            {index + 1} of {total}
+          </span>
+        </div>
+        <h3 className="mt-1 font-display text-[20px] font-bold leading-tight text-text">{name}</h3>
+        <p className="mt-0.5 font-display text-body-sm font-semibold text-accent">
+          {prescription}
+          {lastTime && (
+            <span className="ml-1 font-normal text-text-dim">· last time {lastTime}</span>
+          )}
+        </p>
+        {cues.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {cues.slice(0, 3).map((cue, i) => (
+              <Chip key={i}>{cue}</Chip>
+            ))}
+          </div>
+        )}
+        <div className="mt-3 flex gap-2">
+          <button
+            type="button"
+            onClick={onGoNow}
+            className="flex flex-1 min-h-tap items-center justify-center gap-1.5 rounded-md bg-accent font-body text-body font-bold text-accent-ink transition-opacity hover:opacity-90"
+          >
+            Go now
+            <Icon name="north_east" size={18} />
+          </button>
+          <button
+            type="button"
+            onClick={onCollapse}
+            aria-label="Collapse handoff"
+            className="flex min-h-tap w-12 items-center justify-center rounded-md border border-border bg-surface text-text-dim transition-colors hover:text-text"
+          >
+            <Icon name="arrow_downward" size={18} />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

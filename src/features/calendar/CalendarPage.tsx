@@ -895,6 +895,24 @@ function MonthView({ anchor, ctx }: { anchor: string; ctx: Ctx }) {
   const today = formatDate(new Date());
   const hb = heatBlock(ctx.raceDate);
 
+  // Heat-block summary (redesign frame 12): count strength sessions and the
+  // weekdays with no strength/sauna across the block window.
+  let blockSessions = 0;
+  const restCols = new Set<number>();
+  if (hb) {
+    for (let d = hb.start; d <= hb.end; d = addDays(d, 1)) {
+      const { sessions, slots } = activityFor(d, ctx);
+      blockSessions += sessions.length;
+      if (sessions.length === 0 && slots.length === 0) restCols.add(monCol(d));
+    }
+  }
+  const restLabel = [...restCols]
+    .sort((a, b) => a - b)
+    .map((c) => DOW_LABELS[c])
+    .join(' & ');
+  const fmtShort = (s: string) =>
+    parseLocalDate(s).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+
   return (
     <div>
       {/* Legend top-right */}
@@ -976,8 +994,10 @@ function MonthView({ anchor, ctx }: { anchor: string; ctx: Ctx }) {
             aria-label="race marker"
           />
           <p className="text-body-sm text-text-muted">
-            Heat block {hb.start} – {hb.end}
-            {ctx.raceDate ? ` · Race day ${ctx.raceDate}` : ''}
+            Heat block {fmtShort(hb.start)} – {fmtShort(hb.end)}
+            {blockSessions > 0 ? ` · ${blockSessions} sessions` : ''}
+            {restLabel ? ` · rest ${restLabel}` : ''}
+            {ctx.raceDate ? `. Race day ${fmtShort(ctx.raceDate)}` : ''}
           </p>
         </div>
       )}

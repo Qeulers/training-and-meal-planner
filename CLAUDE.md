@@ -4,18 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is right now
 
-Two things coexist:
+**The React port is built and is the app.** [SPEC.md](SPEC.md)'s target stack — React (Vite) + TypeScript + Tailwind + Supabase — is implemented under [src/](src/), [supabase/](supabase/) (schema + migrations + seed), and [tests/](tests/) (Vitest). Root [index.html](index.html) is the Vite entry (~35 lines); build/dev/test via `npm run dev | build | test`.
 
-1. **The live app** — [index.html](index.html), a single 2,300-line file: vanilla JS, inline CSS, no build step. This is Frank's daily-use Training & Meal Planner (strength programme + gout-aware meal planning + sauna schedule for an ultrarunner). It runs by opening the file in a browser; there is **no package.json, no toolchain, no tests wired up** in this repo yet.
-2. **The port plan** — [SPEC.md](SPEC.md) specifies rebuilding it as React (Vite) + TypeScript + Tailwind + Supabase. **None of that code exists yet.** The `src/`, `supabase/`, `tests/` trees in SPEC §9 are the target, not the current state.
+The original single-file vanilla-JS app is archived at [legacy/index.html](legacy/index.html) (~2,300 lines) as a behavioural reference — it is no longer the live app. The `data/*.json` files are seed data (one file per Supabase table), mirrored into [supabase/seed/](supabase/seed/); see [README.md](README.md) "Regenerating".
 
-The `*.json` files are seed data **extracted from `index.html`** (one file per target Supabase table). Until the port ships, `index.html` is the source of truth and the JSON is derived from it (see [README.md](README.md) "Regenerating"). After the port goes live, that inverts.
-
-When asked to "work on the app," clarify which: patch the live `index.html`, or build the React port per SPEC.
+When asked to "work on the app," it means the React port under `src/` unless the legacy file is named explicitly.
 
 ## Domain logic — the load-bearing part
 
-The value of this app is subtle date arithmetic and shopping-list aggregation. These rules are implemented in `index.html` and restated in **SPEC §7**. Reimplementing them differently is a regression, not an improvement. Port them verbatim into pure functions and table-test them.
+The value of this app is subtle date arithmetic and shopping-list aggregation. These rules live as pure functions in [src/domain/](src/domain/) (`phase.ts`, `heatBlock.ts`, `shoppingList.ts`, `prescription.ts`, `dates.ts`, `sauna.ts`, `schedule.ts`) with table-driven tests in [tests/unit/](tests/unit/), and are restated in **SPEC §7**. Changing their behaviour differently is a regression, not an improvement — keep the tests green.
 
 - **Local-midday anchoring.** All date parsing uses `new Date(dateStr + 'T12:00:00')` to dodge DST/timezone drift. Keep this trick everywhere.
 - **`day_of_week` is `0 = Sunday … 6 = Saturday`** (JS `Date.getDay()`), not ISO. Load-bearing across scheduling and seed data — never renumber.
@@ -33,11 +30,18 @@ The value of this app is subtle date arithmetic and shopping-list aggregation. T
 
 ## Validating the seed data
 
-The seed JSON must satisfy the invariants in [README.md](README.md) "Validation performed" — unique slugs, every FK resolves, every recipe has ≥1 ingredient and ≥1 step, `step_no` contiguous from 1, well-formed unique YouTube URLs per exercise, all `day_of_week` in 0–6. Re-run these as a build-time test after any change to a JSON file or after re-extracting from `index.html`. If you edit `index.html` before the port completes, **re-extract the JSON rather than hand-editing it**, then re-validate.
+The seed JSON must satisfy the invariants in [README.md](README.md) "Validation performed" — unique slugs, every FK resolves, every recipe has ≥1 ingredient and ≥1 step, `step_no` contiguous from 1, well-formed unique YouTube URLs per exercise, all `day_of_week` in 0–6. These are covered by [tests/data/seed.test.ts](tests/data/seed.test.ts) — re-run `npm test` after any change to a seed JSON file. Reference data changes flow through Supabase migrations in [supabase/migrations/](supabase/migrations/).
 
-## Live app internals (index.html)
+## App structure (React port)
 
-Only relevant when patching the current app. Structure within the single file:
+- **Routing / shell** — [src/App.tsx](src/App.tsx): six routes matching SPEC §6, with [BottomNav](src/components/BottomNav.tsx) (phone/tablet-portrait) and [SideNav](src/components/SideNav.tsx) (≥lg). Auth-gated via [AuthProvider](src/data/AuthProvider.tsx); `/preview` is a DEV-only no-auth visual harness ([src/features/dev/Preview.tsx](src/features/dev/Preview.tsx)).
+- **Features** — one folder per tab under [src/features/](src/features/) (`today`, `calendar`, `plan`, `moves`, `food`, `stats`). The session logger lives in `today/WorkoutLogger.tsx` (+ `SetKeypad.tsx`, `CountdownTimer.tsx`); Food is a segmented set of panes (`FuelPane`, `RecipesPane`, `PlannerPane`, `ShopPane`).
+- **Design tokens** — [src/theme/theme.css](src/theme/theme.css) is the single source (dark/light palette, Archivo / Archivo Narrow, self-hosted subset Material Symbols). Tailwind maps semantic utilities to these vars; components use `bg-surface` / `text-accent`, never raw hex. Shared primitives in [src/components/ui.tsx](src/components/ui.tsx).
+- **Data** — reference tables via [src/data/reference.ts](src/data/reference.ts), user read/write via [src/data/user.ts](src/data/user.ts) (TanStack Query + Supabase). Slugs are PKs, FKs are `*_slug` (see below).
+
+## Legacy app internals (legacy/index.html)
+
+Only relevant when cross-checking original behaviour. Structure within the single archived file:
 
 - Three `<script>` blocks. Data lives as JS consts (`EX`, `RECIPES*`, `STEPS*`, `SESSIONS`, `SAUNA`, `PHASE_META`); the render layer is a set of `render*()` functions dispatched by `renderAll()`.
 - **Persistence** is `localStorage` with an in-memory fallback (the `store` object, ~line 521). All keys are prefixed **`fw_`** (`fw_races`, `fw_phaseOv`, `fw_planStart`, …); `store.wipe()` only clears `fw_`-prefixed keys.

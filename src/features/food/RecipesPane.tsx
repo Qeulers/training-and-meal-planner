@@ -59,6 +59,7 @@ function RecipeCard({
             {recipe.meal_type && (
               <Badge tone="food">{MEAL_LABEL[recipe.meal_type] ?? recipe.meal_type}</Badge>
             )}
+            <Badge tone={recipe.diet_tag === 'veg' ? 'accent' : 'neutral'}>{recipe.diet_tag}</Badge>
             <Badge>{recipe.time_minutes} min</Badge>
             {recipe.heat_level > 0 && (
               <Badge tone="danger">{HEAT_ICONS[recipe.heat_level]}</Badge>
@@ -244,6 +245,8 @@ function RecipeRow({
             {MEAL_LABEL[recipe.meal_type] ?? recipe.meal_type}
           </span>
         )}
+        <span className="text-meta text-text-dim">·</span>
+        <span className="text-meta text-text-dim">{recipe.diet_tag}</span>
         <span className="text-meta text-text-dim">·</span>
         <span className="text-meta text-text-dim">{recipe.time_minutes} min</span>
         {recipe.heat_level > 0 && (

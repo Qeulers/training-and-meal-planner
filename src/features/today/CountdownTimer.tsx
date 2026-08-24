@@ -18,6 +18,9 @@ interface Props {
   perSide?: boolean;
   /** Larger, high-visibility layout — used for the active rest timer. */
   prominent?: boolean;
+  /** Slim "LAST REST" layout (redesign frame 8): the handoff card owns the
+   *  advance action, so the rest bar hides its full-width "Skip rest" button. */
+  handoff?: boolean;
   onClose: () => void;
   /** Persist a new default rest for this exercise (rest timer only, on commit). */
   onDefaultChange?: (seconds: number) => void;
@@ -51,12 +54,19 @@ function beep() {
 
 const MIN_REST = 15;
 
-export function CountdownTimer({ seconds, kind, perSide = false, prominent = false, onClose, onDefaultChange }: Props) {
+export function CountdownTimer({
+  seconds,
+  kind,
+  perSide = false,
+  prominent = false,
+  handoff = false,
+  onClose,
+  onDefaultChange,
+}: Props) {
+  // Base rest duration. The redesigned bar drops the separate "Default" field;
+  // instead ±15 tunes this and persists it via onDefaultChange, so a
+  // per-exercise rest default can be set from the rest bar itself.
   const [duration, setDuration] = useState(seconds);
-  // Editable draft for the "Default" field — kept as a raw string so multi-digit
-  // values (e.g. 120) can be typed. Clamped to MIN_REST only on blur, otherwise
-  // the first keystroke would snap "1" up to 15 and block typing "120".
-  const [durationDraft, setDurationDraft] = useState(String(seconds));
   const [side, setSide] = useState<1 | 2>(1);
   const [running, setRunning] = useState(kind === 'rest'); // rest autostarts
   const [remainingMs, setRemainingMs] = useState(seconds * 1000);
@@ -104,6 +114,11 @@ export function CountdownTimer({ seconds, kind, perSide = false, prominent = fal
     const next = Math.max(0, Math.round(remainingMs / 1000 + delta));
     setRemainingMs(next * 1000);
     if (running) targetRef.current = Date.now() + next * 1000;
+    // Shift the base rest duration too and persist it as this exercise's
+    // default (no-op for holds / rests without an exercise slug).
+    const nextDefault = Math.max(MIN_REST, duration + delta);
+    setDuration(nextDefault);
+    if (nextDefault !== duration) onDefaultChange?.(nextDefault);
   };
 
   const restart = () => {
@@ -117,6 +132,79 @@ export function CountdownTimer({ seconds, kind, perSide = false, prominent = fal
   const reduce =
     typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+  // ── Rest bar (redesign frames 7 / 8) ──────────────────────────────────────
+  // A stripped-back bar: REST label + big countdown, ±15, mute, and a
+  // full-width Skip rest. The engine (wall-clock target, wake lock, cue, mute)
+  // is unchanged — only the chrome differs from the hold card below.
+  if (kind === 'rest') {
+    return (
+      <div
+        role="timer"
+        aria-live="off"
+        className={[
+          'px-4 py-3 transition-colors duration-fast ease-brand',
+          warning && !reduce ? 'bg-warning/10' : '',
+        ].join(' ')}
+      >
+        <div className="flex items-center gap-3">
+          {/* Label + big time */}
+          <div className="min-w-0">
+            <p className="font-display text-label font-semibold uppercase tracking-label text-accent">
+              {handoff ? 'Last rest' : 'Rest'}
+            </p>
+            <p
+              className={`font-body font-bold leading-none tabular-nums ${
+                prominent && !handoff ? 'text-[3rem]' : 'text-[2rem]'
+              } ${warning ? 'text-warning' : 'text-text'}`}
+            >
+              {fmt(remainingMs)}
+            </p>
+          </div>
+
+          {/* Adjust + mute */}
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => adjust(-15)}
+              aria-label="Subtract 15 seconds"
+              className="flex h-11 min-w-[3.5rem] items-center justify-center rounded-md border border-border bg-surface font-body text-body-sm font-bold text-text-muted transition-colors hover:text-text"
+            >
+              −15s
+            </button>
+            <button
+              type="button"
+              onClick={() => adjust(15)}
+              aria-label="Add 15 seconds"
+              className="flex h-11 min-w-[3.5rem] items-center justify-center rounded-md border border-border bg-surface font-body text-body-sm font-bold text-text-muted transition-colors hover:text-text"
+            >
+              +15s
+            </button>
+            <button
+              type="button"
+              onClick={() => setMuted((m) => !m)}
+              aria-label={muted ? 'Unmute timer' : 'Mute timer'}
+              className="flex h-11 w-11 items-center justify-center rounded-md border border-border bg-surface text-text-dim transition-colors hover:text-text"
+            >
+              <Icon name={muted ? 'volume_off' : 'volume_up'} size={18} />
+            </button>
+          </div>
+        </div>
+
+        {/* Skip rest — the handoff card owns the advance action, so hide it there */}
+        {!handoff && (
+          <button
+            type="button"
+            onClick={onClose}
+            className="mt-3 flex min-h-tap w-full items-center justify-center rounded-md bg-accent font-body text-body font-bold text-accent-ink transition-opacity hover:opacity-90"
+          >
+            Skip rest
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  // ── Hold card (isometric holds — unchanged) ───────────────────────────────
   return (
     <div
       role="timer"
@@ -130,7 +218,7 @@ export function CountdownTimer({ seconds, kind, perSide = false, prominent = fal
       <div className="flex items-center justify-between px-3 pt-3">
         <p className="font-display text-label font-semibold uppercase tracking-label text-text-dim">
           <Icon name="timer" size={13} className="mr-1 align-middle" />
-          {kind === 'rest' ? 'Rest' : 'Hold'}
+          Hold
           {perSide ? ` · side ${side}/2` : ''}
         </p>
         <div className="flex items-center gap-1">
@@ -147,7 +235,7 @@ export function CountdownTimer({ seconds, kind, perSide = false, prominent = fal
           <button
             type="button"
             onClick={onClose}
-            aria-label={kind === 'rest' ? 'Skip rest' : 'Close timer'}
+            aria-label="Close timer"
             className="flex h-8 w-8 items-center justify-center rounded-md text-text-dim transition-colors hover:text-text"
           >
             <Icon name="close" size={18} />
@@ -157,18 +245,6 @@ export function CountdownTimer({ seconds, kind, perSide = false, prominent = fal
 
       {/* Countdown display + controls */}
       <div className="flex items-center gap-3 px-3 pb-3 pt-1">
-        {/* Adjust buttons (rest only) */}
-        {kind === 'rest' && (
-          <button
-            type="button"
-            onClick={() => adjust(-15)}
-            aria-label="Subtract 15 seconds"
-            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md border border-border bg-surface font-body text-body-sm font-bold text-text-muted transition-colors hover:text-text"
-          >
-            −15
-          </button>
-        )}
-
         {/* Time display */}
         <div className="flex flex-1 items-center justify-center gap-3">
           <p
@@ -212,46 +288,7 @@ export function CountdownTimer({ seconds, kind, perSide = false, prominent = fal
             </button>
           )}
         </div>
-
-        {/* Adjust button (rest only) */}
-        {kind === 'rest' && (
-          <button
-            type="button"
-            onClick={() => adjust(15)}
-            aria-label="Add 15 seconds"
-            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md border border-border bg-surface font-body text-body-sm font-bold text-text-muted transition-colors hover:text-text"
-          >
-            +15
-          </button>
-        )}
       </div>
-
-      {/* Default rest duration adjuster (rest only) */}
-      {kind === 'rest' && (
-        <label className="flex items-center justify-center gap-2 border-t border-border px-3 py-2 text-meta text-text-dim">
-          Default
-          <input
-            type="number"
-            inputMode="numeric"
-            min={MIN_REST}
-            step={15}
-            value={durationDraft}
-            onChange={(e) => {
-              setDurationDraft(e.target.value);
-              const n = Number(e.target.value);
-              if (Number.isFinite(n) && n > 0) setDuration(n); // update live, clamp on blur
-            }}
-            onBlur={() => {
-              const n = Math.max(MIN_REST, Number(durationDraft) || duration);
-              setDuration(n);
-              setDurationDraft(String(n));
-              if (n !== seconds) onDefaultChange?.(n); // persist only a real change
-            }}
-            className="w-14 rounded-md border border-border bg-surface px-1.5 py-1 text-center text-body-sm text-text"
-          />
-          s
-        </label>
-      )}
     </div>
   );
 }
