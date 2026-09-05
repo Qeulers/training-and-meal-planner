@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Badge, Pill, Button, QueryBoundary } from '@/components/ui';
 import { Icon } from '@/components/Icon';
 import {
@@ -11,6 +12,7 @@ import {
   type RecipeStep,
 } from '@/data/reference';
 import { useBasket, useToggleBasket } from '@/data/user';
+import { matchesRecipeSearch } from '@/domain/recipeSearch';
 
 const MEAL_FILTERS = [
   { key: 'all', label: 'All' },
@@ -266,9 +268,25 @@ function RecipeRow({
   );
 }
 
-export function RecipesPane() {
+export function RecipesPane({ onPlanForDay }: { onPlanForDay?: (slug: string) => void } = {}) {
   const [meal, setMeal] = useState<(typeof MEAL_FILTERS)[number]['key']>('all');
   const [cuisine, setCuisine] = useState('all');
+  /*
+   * The selected recipe and the search text live in the URL (FOOD-01), so
+   * Today can deep-link tonight's dinner, a recipe is shareable, and refresh
+   * and Back both land where the user was.
+   */
+  const [params, setParams] = useSearchParams();
+  const selectedSlug = params.get('recipe');
+  const query = params.get('q') ?? '';
+  const patch = (next: Record<string, string | null>) => {
+    const merged = new URLSearchParams(params);
+    for (const [k, v] of Object.entries(next)) {
+      if (v == null || v === '') merged.delete(k);
+      else merged.set(k, v);
+    }
+    setParams(merged);
+  };
 
   const recipes = useRecipes();
   const ingredients = useRecipeIngredients();
@@ -293,6 +311,11 @@ export function RecipesPane() {
           setMeal={setMeal}
           cuisine={cuisine}
           setCuisine={setCuisine}
+          query={query}
+          setQuery={(q) => patch({ q, recipe: null })}
+          selectedSlug={selectedSlug}
+          setSelectedSlug={(slug) => patch({ recipe: slug })}
+          onPlanForDay={onPlanForDay}
         />
       )}
     </QueryBoundary>
@@ -310,6 +333,11 @@ function RecipesInner({
   setMeal,
   cuisine,
   setCuisine,
+  query,
+  setQuery,
+  selectedSlug,
+  setSelectedSlug,
+  onPlanForDay,
 }: {
   recipes: Recipe[];
   ingredients: RecipeIngredient[];
@@ -321,6 +349,11 @@ function RecipesInner({
   setMeal: (m: (typeof MEAL_FILTERS)[number]['key']) => void;
   cuisine: string;
   setCuisine: (c: string) => void;
+  query: string;
+  setQuery: (q: string) => void;
+  selectedSlug: string | null;
+  setSelectedSlug: (slug: string | null) => void;
+  onPlanForDay?: (slug: string) => void;
 }) {
   const ingByRecipe = useMemo(() => {
     const m = new Map<string, RecipeIngredient[]>();
@@ -339,16 +372,39 @@ function RecipesInner({
   const shown = recipes.filter(
     (r) =>
       (meal === 'all' || r.meal_type === meal) &&
-      (cuisine === 'all' || r.cuisine_code === cuisine),
+      (cuisine === 'all' || r.cuisine_code === cuisine) &&
+      matchesRecipeSearch(
+        {
+          name: r.name,
+          ingredientNames: (ingByRecipe.get(r.slug) ?? []).map((i) => i.ingredient_name),
+        },
+        query,
+      ),
   );
 
-  // Desktop: selected recipe state (defaults to first in list)
-  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
-  const effectiveSelected = selectedSlug ?? shown[0]?.slug ?? null;
-  const selectedRecipe = shown.find((r) => r.slug === effectiveSelected) ?? shown[0] ?? null;
+  /*
+   * A deep-linked recipe wins even when the current filters would hide it:
+   * following a link from Today must show that recipe, not silently fall back
+   * to whatever happens to be first (FOOD-01).
+   */
+  const linked = selectedSlug ? recipes.find((r) => r.slug === selectedSlug) ?? null : null;
+  const effectiveSelected = linked?.slug ?? shown[0]?.slug ?? null;
+  const selectedRecipe = linked ?? shown[0] ?? null;
 
   const filterBar = (
     <>
+      {/* Search — name or ingredient (FOOD-01) */}
+      <label className="block">
+        <span className="sr-only">Search recipes by name or ingredient</span>
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search name or ingredient…"
+          className="min-h-tap w-full rounded-md border border-border bg-surface px-3 text-body-sm text-text placeholder:text-text-dim"
+        />
+      </label>
+
       {/* Meal filter pills */}
       <div className="flex gap-2 overflow-x-auto pb-1">
         {MEAL_FILTERS.map((f) => (
@@ -396,7 +452,15 @@ function RecipesInner({
       {/* ---- Phone layout (below lg) ---- */}
       <div className="lg:hidden space-y-3">
         <div className="space-y-2 mb-4">{filterBar}</div>
-        <p className="text-body-sm text-text-dim">{shown.length} recipes</p>
+        <p className="text-body-sm text-text-dim">
+          {shown.length} recipe{shown.length === 1 ? '' : 's'}
+          {query ? ` matching “${query}”` : ''}
+        </p>
+        {shown.length === 0 && (
+          <p className="text-body-sm text-text-dim">
+            Nothing matches “{query}”. Try an ingredient, or clear the filters.
+          </p>
+        )}
         {shown.map((r) => (
           <RecipeCard
             key={r.slug}
@@ -433,7 +497,11 @@ function RecipesInner({
               />
             ))}
             {shown.length === 0 && (
-              <p className="p-4 text-body-sm text-text-dim">No recipes match the current filter.</p>
+              <p className="p-4 text-body-sm text-text-dim">
+                {query
+                  ? `Nothing matches “${query}”. Try an ingredient, or clear the filters.`
+                  : 'No recipes match the current filter.'}
+              </p>
             )}
           </div>
         </div>
@@ -453,6 +521,11 @@ function RecipesInner({
                 inBasket={basketSlugs.has(selectedRecipe.slug)}
                 onToggleBasket={() =>
                   onToggleBasket(selectedRecipe.slug, basketSlugs.has(selectedRecipe.slug))
+                }
+                onPlanForDay={
+                  onPlanForDay && selectedRecipe.meal_type === 'dinner'
+                    ? () => onPlanForDay(selectedRecipe.slug)
+                    : undefined
                 }
               />
             </div>

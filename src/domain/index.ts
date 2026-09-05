@@ -8,3 +8,6 @@ export * from './pluralise';
 export * from './shoppingList';
 export * from './prescription';
 export * from './prefill';
+export * from './dietPrefs';
+export * from './suggestDinners';
+export * from './recipeSearch';

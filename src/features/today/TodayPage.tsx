@@ -305,7 +305,12 @@ export function TodayPage() {
                     Tonight
                   </Eyebrow>
                   <Link
-                    to="/food"
+                    /*
+                     * Deep-links the actual recipe (FOOD-01). This used to go to
+                     * bare /food, which dropped the user on the Fuel tab with no
+                     * indication of which recipe they had just tapped.
+                     */
+                    to={`/food?pane=recipes&recipe=${encodeURIComponent(tonightRecipe.slug)}`}
                     className="flex items-center gap-3 rounded-lg border border-border bg-surface p-4 transition-colors hover:border-border-strong"
                   >
                     <Icon name="restaurant" size={22} className="shrink-0 text-food" />

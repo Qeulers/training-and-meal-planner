@@ -44,7 +44,7 @@ import { CalendarPage } from '@/features/calendar/CalendarPage';
 
 function LocationProbe() {
   const loc = useLocation();
-  return <output data-testid="loc">{loc.pathname + loc.search}</output>;
+  return <span data-testid="loc">{loc.pathname + loc.search}</span>;
 }
 
 function renderCalendar(initialEntry = '/calendar?view=month&anchor=2027-01-31&day=2027-01-31') {
