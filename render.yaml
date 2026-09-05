@@ -26,3 +26,11 @@ services:
       - path: /assets/*
         name: Cache-Control
         value: public, max-age=31536000, immutable
+      # The service worker must NOT be cached: a stale copy keeps serving an old
+      # app shell, and a service worker that cannot be replaced is very hard to
+      # recover from in the field. Its own cache is versioned by build id, so
+      # revalidating this one file on every navigation costs nothing.
+      - path: /sw.js
+        name: Cache-Control
+        value: no-cache
+

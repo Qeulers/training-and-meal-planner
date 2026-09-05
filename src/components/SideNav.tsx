@@ -1,8 +1,11 @@
+import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { Icon } from './Icon';
 import { NAV_ITEMS } from './navItems';
 import { ThemeToggle } from './ThemeToggle';
 import { useShellStatus } from '@/features/shared/useShellStatus';
+import { SyncStatus } from './SyncStatus';
+import { AccountMenu } from './AccountMenu';
 
 /**
  * Labeled left sidebar for wide screens (≥lg) — the design's iPad-landscape /
@@ -15,15 +18,29 @@ import { useShellStatus } from '@/features/shared/useShellStatus';
  */
 export function SideNav() {
   const { phaseLabel, daysToRace } = useShellStatus();
-  return <SideNavView phaseLabel={phaseLabel} daysToRace={daysToRace} />;
+  return (
+    <SideNavView
+      phaseLabel={phaseLabel}
+      daysToRace={daysToRace}
+      syncStatus={
+        <>
+          <SyncStatus className="px-2" />
+          <AccountMenu />
+        </>
+      }
+    />
+  );
 }
 
 export function SideNavView({
   phaseLabel,
   daysToRace,
+  syncStatus = null,
 }: {
   phaseLabel: string | null;
   daysToRace: number | null;
+  /** Injected so the dev preview harness can render the nav without a query client. */
+  syncStatus?: ReactNode;
 }) {
   return (
     <nav
@@ -71,10 +88,7 @@ export function SideNavView({
       {/* Footer: theme + sync */}
       <div className="mt-4 space-y-3 px-1">
         <ThemeToggle />
-        <p className="flex items-center gap-1.5 px-2 text-meta text-text-dim">
-          <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-success" />
-          Synced
-        </p>
+        {syncStatus}
       </div>
     </nav>
   );

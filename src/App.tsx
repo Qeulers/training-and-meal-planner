@@ -3,7 +3,10 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '@/data/queryClient';
 import { ThemeProvider } from '@/theme/ThemeProvider';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { SyncStatus } from '@/components/SyncStatus';
+import { AccountMenu } from '@/components/AccountMenu';
 import { AuthProvider, useAuth } from '@/data/AuthProvider';
+import { SyncProvider, useSync } from '@/data/sync/SyncProvider';
 import { BottomNav } from '@/components/BottomNav';
 import { SideNav } from '@/components/SideNav';
 import { SignIn } from '@/features/auth/SignIn';
@@ -21,11 +24,17 @@ function ProtectedShell() {
       <SideNav />
       {/* Mobile / tablet-portrait top bar (the sidebar carries brand + theme at ≥lg). */}
       <header className="sticky top-0 z-10 border-b border-border bg-bg/90 backdrop-blur lg:hidden">
-        <div className="mx-auto flex max-w-content items-center justify-between px-4 py-2">
-          <span className="font-display text-body-sm font-bold uppercase tracking-label text-text-dim">
-            Training &amp; Meal Planner
-          </span>
-          <ThemeToggle />
+        <div className="mx-auto flex max-w-content items-center justify-between gap-3 px-4 py-2">
+          <div className="min-w-0">
+            <span className="block truncate font-display text-body-sm font-bold uppercase tracking-label text-text-dim">
+              Training &amp; Meal Planner
+            </span>
+            <SyncStatus />
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <AccountMenu compact />
+            <ThemeToggle />
+          </div>
         </div>
       </header>
       <Routes>
@@ -44,11 +53,14 @@ function ProtectedShell() {
 
 function Gate() {
   const { session, loading } = useAuth();
+  const { hydrated } = useSync();
   // DEV-only visual harness for screenshotting components without auth.
   if (import.meta.env.DEV && window.location.pathname === '/preview') {
     return <Preview />;
   }
-  if (loading) {
+  // Wait for the cached data to be restored before rendering the shell,
+  // otherwise a cold offline start flashes empty screens before hydrating.
+  if (loading || !hydrated) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-bg text-text-dim">
         Loading…
@@ -64,7 +76,10 @@ export function App() {
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <AuthProvider>
-            <Gate />
+            {/* Inside AuthProvider: the outbox stamps and filters by owner. */}
+            <SyncProvider>
+              <Gate />
+            </SyncProvider>
           </AuthProvider>
         </BrowserRouter>
       </QueryClientProvider>

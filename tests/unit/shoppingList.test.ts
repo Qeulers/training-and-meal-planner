@@ -115,6 +115,37 @@ describe('aggregate — SPEC §6.5 / §7.4', () => {
     expect(fresh.items).toHaveLength(2); // recipe garlic + staple garlic, unmerged
   });
 
+  // SHOP-01: the two rows above used to emit the SAME item_key, so ticking the
+  // recipe garlic silently ticked the pantry staple too.
+  it('gives a staple and its recipe twin distinct, namespaced item_keys', () => {
+    const groups = aggregate({
+      recipes: [recipe('a', 'Stir-fry', '2 cloves')],
+      staples: [{ ingredient_name: 'Garlic', quantity_text: '1 bulb', category_code: 'F' }],
+      categories: CATS,
+      exceptions: EX,
+    });
+    const fresh = groups.find((g) => g.code === 'F')!;
+    const [recipeRow, stapleRow] = fresh.items;
+
+    expect(recipeRow.item_key).toBe(itemKey('Garlic', 'F'));
+    expect(stapleRow.item_key).toBe('staple:' + itemKey('Garlic', 'F'));
+    expect(new Set(fresh.items.map((i) => i.item_key)).size).toBe(fresh.items.length);
+  });
+
+  it('keeps every emitted item_key unique across the whole list', () => {
+    const groups = aggregate({
+      recipes: [recipe('a', 'Stir-fry', '2 cloves'), recipe('b', 'Curry', '1 clove')],
+      staples: [
+        { ingredient_name: 'Garlic', quantity_text: '1 bulb', category_code: 'F' },
+        { ingredient_name: 'Eggs', quantity_text: '6', category_code: 'P' },
+      ],
+      categories: CATS,
+      exceptions: EX,
+    });
+    const keys = groups.flatMap((g) => g.items.map((i) => i.item_key));
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
   it('returns no empty category groups', () => {
     const groups = aggregate({
       recipes: [

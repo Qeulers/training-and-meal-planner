@@ -2,16 +2,19 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
 import { Button, Eyebrow, Chip } from '@/components/ui';
 import { parseHold, prescribedSets } from '@/domain/prescription';
-import { formatDate } from '@/domain/dates';
+import { formatDate, parseLocalDate } from '@/domain/dates';
+import { lastOccurrence } from '@/domain/prefill';
 import { embedUrl } from '@/domain/youtube';
 import {
   useAllSets,
   useSaveWorkout,
   useUserSettings,
   useSetRestOverride,
+  useUserId,
   type SetWithDate,
   type RestOverrides,
 } from '@/data/user';
+import { useWorkoutDraft } from '@/data/sync/drafts';
 import type { SessionItem, Exercise } from '@/data/reference';
 import type { SessionTemplate } from '@/domain/schedule';
 import { CountdownTimer } from './CountdownTimer';
@@ -24,6 +27,14 @@ interface Props {
   exercises: Exercise[];
   phaseSlug: string;
   onClose: () => void;
+  /**
+   * The date this session is logged under. Defaults to today.
+   *
+   * Calendar carryover deliberately records a session done from another day as
+   * done TODAY (WORK-03); the difference is now disclosed in the header rather
+   * than being silent. Backdating is a separate decision (D-05).
+   */
+  loggedOn?: string;
 }
 
 interface Row {
@@ -33,20 +44,21 @@ interface Row {
 }
 
 /**
- * Most recent logged sets for an exercise, or `blankRows` empty rows when there's
- * no history — seeded from the prescribed set count so a fresh exercise opens
- * with the right number of sets (SPEC §6.1). The user can still add more.
+ * Rows to open an exercise with: the sets from the last workout that actually
+ * contained it, or `blankRows` empty rows when there is no history — seeded from
+ * the prescribed set count so a fresh exercise opens with the right number of
+ * sets (SPEC §6.1). The user can still add more.
+ *
+ * `lastOccurrence` picks a single workout rather than a date, so two sessions
+ * logged on one day no longer merge into a set list that never happened.
  */
 function prefill(slug: string, allSets: SetWithDate[], blankRows: number): Row[] {
-  const forEx = allSets.filter((s) => s.exercise_slug === slug);
-  if (forEx.length) {
-    const latest = forEx.reduce((a, b) => (b.logged_on > a.logged_on ? b : a)).logged_on;
-    const rows = forEx
-      .filter((s) => s.logged_on === latest)
-      .sort((a, b) => a.set_no - b.set_no)
-      .map((s) => ({ weight: Number(s.weight_kg), reps: s.reps, done: false }));
-    if (rows.length) return rows;
-  }
+  const rows = lastOccurrence(slug, allSets).map((s) => ({
+    weight: Number(s.weight_kg),
+    reps: s.reps,
+    done: false,
+  }));
+  if (rows.length) return rows;
   return Array.from({ length: Math.max(1, blankRows) }, () => ({ weight: 0, reps: 0, done: false }));
 }
 
@@ -63,9 +75,19 @@ function fmtElapsed(s: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-export function WorkoutLogger({ session, items, exercises, phaseSlug, onClose }: Props) {
+export function WorkoutLogger({
+  session,
+  items,
+  exercises,
+  phaseSlug,
+  onClose,
+  loggedOn,
+}: Props) {
   const allSets = useAllSets();
   const save = useSaveWorkout();
+  const userId = useUserId();
+  const today = formatDate(new Date());
+  const logDate = loggedOn ?? today;
   const nameBy = useMemo(() => new Map(exercises.map((e) => [e.slug, e.name])), [exercises]);
   const exBy = useMemo(() => new Map(exercises.map((e) => [e.slug, e])), [exercises]);
   // Prescribed set count per exercise — seeds blank rows for a fresh exercise.
@@ -83,7 +105,12 @@ export function WorkoutLogger({ session, items, exercises, phaseSlug, onClose }:
   const restFor = (slug: string) =>
     restOverrides[slug] ?? exBy.get(slug)?.rest_seconds ?? REST_FALLBACK;
 
+  // Durable draft: the logger used to hold sets in state alone, so a phone that
+  // backgrounded mid-session and got reclaimed lost the workout (WORK-01).
+  const draft = useWorkoutDraft(userId, session.session_key, logDate);
   const [sets, setSets] = useState<Record<string, Row[]>>({});
+  const [reviewing, setReviewing] = useState(false);
+  const [saveError, setSaveError] = useState<unknown>(null);
   const [timer, setTimer] = useState<Timer | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [nextExpanded, setNextExpanded] = useState(false);
@@ -132,57 +159,113 @@ export function WorkoutLogger({ session, items, exercises, phaseSlug, onClose }:
     return () => window.clearInterval(id);
   }, []);
 
-  // Initialise once history has loaded.
+  // Restore a saved draft once, on open. Runs only when the draft store has
+  // finished loading, so it cannot race the first edit.
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current || !draft.loaded) return;
+    restored.current = true;
+    if (draft.draft) setSets(draft.draft.sets);
+  }, [draft.loaded, draft.draft]);
+
+  /** Apply a change to the rows and persist it. */
+  const writeSets = (next: (prev: Record<string, Row[]>) => Record<string, Row[]>) =>
+    setSets((prev) => {
+      const value = next(prev);
+      draft.save({
+        session_name: session.name,
+        phase_slug: phaseSlug,
+        sets: value,
+      });
+      return value;
+    });
+
   const rowsFor = (slug: string): Row[] =>
     sets[slug] ?? prefill(slug, allSets.data ?? [], blankRowsFor(slug));
   const update = (slug: string, i: number, patch: Partial<Row>) =>
-    setSets((prev) => {
+    writeSets((prev) => {
       const rows = [...(prev[slug] ?? prefill(slug, allSets.data ?? [], blankRowsFor(slug)))];
       rows[i] = { ...rows[i], ...patch };
       return { ...prev, [slug]: rows };
     });
   const addSet = (slug: string) =>
-    setSets((prev) => {
+    writeSets((prev) => {
       const rows = prev[slug] ?? prefill(slug, allSets.data ?? [], blankRowsFor(slug));
       const last = rows[rows.length - 1] ?? { weight: 0, reps: 0 };
       return { ...prev, [slug]: [...rows, { weight: last.weight, reps: 0, done: false }] };
     });
 
+  /*
+   * Which sets will be written. Eligibility is unchanged — `done || reps > 0`,
+   * matching SPEC §6.1 — because changing completion semantics needs a product
+   * decision (D-01), and zeroing prefilled reps by default is explicitly ruled
+   * out. Instead the review sheet shows exactly what is about to be saved, and
+   * `excluded` lets the user drop a line they did not actually do.
+   */
+  const [excluded, setExcluded] = useState<Set<string>>(new Set());
+  const lineId = (slug: string, i: number) => `${slug}#${i}`;
+
+  const eligible = items.flatMap((it) =>
+    rowsFor(it.exercise_slug)
+      .map((r, i) => ({ slug: it.exercise_slug, index: i, row: r }))
+      .filter(({ row }) => row.done || row.reps > 0),
+  );
+  const included = eligible.filter(({ slug, index }) => !excluded.has(lineId(slug, index)));
+
   const onSave = async () => {
-    const out = items.flatMap((it) => {
-      const rows = rowsFor(it.exercise_slug);
-      return rows
-        .filter((r) => r.done || r.reps > 0) // persist only completed / repped sets
-        .map((r, idx) => ({
-          exercise_slug: it.exercise_slug,
-          set_no: idx + 1,
-          weight_kg: r.weight,
-          reps: r.reps,
-        }));
+    setSaveError(null);
+    // Durable first, network second. Without this the draft is only in memory
+    // for up to the debounce interval, and a failure right here would lose it.
+    try {
+      await draft.flushNow();
+    } catch {
+      /* reported through draft.error; the save below still surfaces failure */
+    }
+    // The draft records the queued operation id, so a second tap cannot create
+    // a second workout (WORK-02).
+    if (draft.draft?.submitted_as) {
+      onClose();
+      return;
+    }
+    const byExercise = new Map<string, number>();
+    const out = included.map(({ slug, row }) => {
+      const n = (byExercise.get(slug) ?? 0) + 1;
+      byExercise.set(slug, n);
+      return { exercise_slug: slug, set_no: n, weight_kg: row.weight, reps: row.reps };
     });
-    await save.mutateAsync({
-      logged_on: formatDate(new Date()),
-      session_key: session.session_key,
-      session_name: session.name,
-      phase_slug: phaseSlug,
-      sets: out,
-    });
-    onClose();
+    try {
+      const intent = await save.mutateAsync({
+        logged_on: logDate,
+        session_key: session.session_key,
+        session_name: session.name,
+        phase_slug: phaseSlug,
+        sets: out,
+      });
+      // Durably accepted. Link the draft to its save, then drop it.
+      draft.save({ submitted_as: intent.operation_id });
+      await draft.clear();
+      onClose();
+    } catch (err) {
+      // Saving failed, so the draft stays exactly as it was (WORK-02).
+      setSaveError(err);
+      setReviewing(false);
+    }
   };
 
   // Any work worth confirming-before-discard?
   const anyLogged = items.some((it) =>
     rowsFor(it.exercise_slug).some((r) => r.done || r.reps > 0),
   );
-  const handleDiscard = () => {
+  const handleDiscard = async () => {
     if (anyLogged && !window.confirm('Discard this session? Logged sets will not be saved.')) return;
+    await draft.clear();
     onClose();
   };
 
   // Mark every set of an exercise done and advance to the next move (or the
   // finish block on the last one).
   const completeExercise = (slug: string, itemIdx: number) => {
-    setSets((prev) => {
+    writeSets((prev) => {
       const rows = (prev[slug] ?? prefill(slug, allSets.data ?? [], blankRowsFor(slug))).map((r) => ({
         ...r,
         done: true,
@@ -241,17 +324,27 @@ export function WorkoutLogger({ session, items, exercises, phaseSlug, onClose }:
             </span>
           </button>
 
-          {/* Center: session name + elapsed */}
+          {/* Center: session name, elapsed, and the date this will be logged
+              under — carryover from another day records as today (WORK-03). */}
           <div className="flex-1 text-center">
             <p className="font-display text-label font-semibold uppercase tracking-label text-text-dim">
               {session.name}&ensp;·&ensp;{fmtElapsed(elapsed)} elapsed
             </p>
+            <p className="text-meta text-text-dim">
+              Logging as {logDate === today ? 'today' : ''}
+              {logDate === today ? ', ' : ''}
+              {parseLocalDate(logDate).toLocaleDateString(undefined, {
+                weekday: 'short',
+                day: 'numeric',
+                month: 'short',
+              })}
+            </p>
           </div>
 
-          {/* Right: Save */}
+          {/* Right: Save — opens a review of exactly what will be written. */}
           <button
             type="button"
-            onClick={onSave}
+            onClick={() => setReviewing(true)}
             disabled={save.isPending}
             className="font-body text-body-sm font-bold text-accent transition-opacity hover:opacity-70 disabled:opacity-50"
           >
@@ -457,6 +550,46 @@ export function WorkoutLogger({ session, items, exercises, phaseSlug, onClose }:
         </div>
       </div>
 
+      {/* Saving failed: the draft is intact, so say so rather than implying loss. */}
+      {saveError != null && (
+        <div
+          role="alert"
+          className="fixed inset-x-0 bottom-20 z-40 mx-auto max-w-content px-4"
+        >
+          <p className="rounded-md border border-danger/50 bg-danger/10 px-3 py-2 text-body-sm text-text">
+            Could not save this session. Your sets are still here — try again.
+          </p>
+        </div>
+      )}
+
+      {reviewing && (
+        <ReviewSheet
+          logDate={logDate}
+          isToday={logDate === today}
+          sessionName={session.name}
+          lines={eligible.map(({ slug, index, row }) => ({
+            id: lineId(slug, index),
+            exerciseName: nameBy.get(slug) ?? slug,
+            setNo: index + 1,
+            weight: row.weight,
+            reps: row.reps,
+            included: !excluded.has(lineId(slug, index)),
+          }))}
+          saving={save.isPending}
+          notDurable={!draft.durable}
+          onToggle={(id) =>
+            setExcluded((prev) => {
+              const next = new Set(prev);
+              if (next.has(id)) next.delete(id);
+              else next.add(id);
+              return next;
+            })
+          }
+          onCancel={() => setReviewing(false)}
+          onConfirm={onSave}
+        />
+      )}
+
       {/* ── Sticky bottom bar ── */}
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-bg/95 backdrop-blur">
         <div className="mx-auto max-w-content">
@@ -533,6 +666,142 @@ export function WorkoutLogger({ session, items, exercises, phaseSlug, onClose }:
 }
 
 /* ── Sub-components ─────────────────────────────────────────────────────── */
+
+interface ReviewLine {
+  id: string;
+  exerciseName: string;
+  setNo: number;
+  weight: number;
+  reps: number;
+  included: boolean;
+}
+
+/**
+ * Pre-save review (WORK-02).
+ *
+ * Eligibility is still SPEC §6.1's `done || reps > 0`, which includes prefilled
+ * reps the user never confirmed. Rather than change that rule — a product
+ * decision (D-01) — or zero the prefill, which is explicitly ruled out, this
+ * shows every line that is about to be written and lets one be dropped. The
+ * logging date is stated here too, because a session carried over from another
+ * day records as today.
+ */
+function ReviewSheet({
+  logDate,
+  isToday,
+  sessionName,
+  lines,
+  saving,
+  notDurable,
+  onToggle,
+  onCancel,
+  onConfirm,
+}: {
+  logDate: string;
+  isToday: boolean;
+  sessionName: string;
+  lines: ReviewLine[];
+  saving: boolean;
+  notDurable: boolean;
+  onToggle: (id: string) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const returnTo = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    returnTo.current = document.activeElement as HTMLElement | null;
+    dialogRef.current?.querySelector('button')?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      returnTo.current?.focus();
+    };
+  }, [onCancel]);
+
+  const includedCount = lines.filter((l) => l.included).length;
+  const dateLabel = parseLocalDate(logDate).toLocaleDateString(undefined, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-bg/80 p-0 backdrop-blur sm:items-center sm:p-4">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="review-title"
+        className="flex max-h-[85vh] w-full max-w-md flex-col rounded-t-lg border border-border bg-surface sm:rounded-lg"
+      >
+        <div className="border-b border-border p-4">
+          <h2 id="review-title" className="font-display text-data font-bold text-text">
+            Save {includedCount} set{includedCount === 1 ? '' : 's'}
+          </h2>
+          <p className="mt-1 text-body-sm text-text-muted">
+            {sessionName} · logged as {isToday ? 'today, ' : ''}
+            {dateLabel}
+          </p>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {lines.length === 0 ? (
+            <p className="p-4 text-body-sm text-text-muted">
+              Nothing to save yet — mark a set done, or enter some reps.
+            </p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {lines.map((l) => (
+                <li key={l.id}>
+                  <label className="flex min-h-tap cursor-pointer items-center gap-3 px-4 py-2">
+                    <input
+                      type="checkbox"
+                      checked={l.included}
+                      onChange={() => onToggle(l.id)}
+                      className="h-4 w-4 shrink-0 accent-[color:var(--color-accent)]"
+                    />
+                    <span
+                      className={`min-w-0 flex-1 truncate text-body-sm ${
+                        l.included ? 'text-text' : 'text-text-dim line-through'
+                      }`}
+                    >
+                      {l.exerciseName}
+                    </span>
+                    <span className="shrink-0 text-body-sm text-text-muted">
+                      set {l.setNo} · {l.weight} kg × {l.reps}
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {notDurable && (
+          <p className="border-t border-border px-4 py-2 text-meta text-warning">
+            This browser will not keep the session if you close the tab before it syncs.
+          </p>
+        )}
+
+        <div className="flex gap-2 border-t border-border p-4">
+          <Button variant="ghost" onClick={onCancel}>
+            Back
+          </Button>
+          <div className="flex-1">
+            <Button full onClick={onConfirm} disabled={saving || includedCount === 0}>
+              {saving ? 'Saving…' : `Save ${includedCount} set${includedCount === 1 ? '' : 's'}`}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /** "Watch demo" (inline embed) + Cues disclosure row */
 function WatchDemoRow({ videoUrl, cues }: { videoUrl: string; cues: string[] }) {

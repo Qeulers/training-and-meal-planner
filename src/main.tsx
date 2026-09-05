@@ -10,9 +10,13 @@ import '@fontsource/archivo-narrow/600.css';
 // class live in theme.css; the codepoint map is src/components/iconCodepoints.ts.
 import './theme/theme.css';
 import { App } from './App';
+import { registerServiceWorker } from './data/sync/registerServiceWorker';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />
   </StrictMode>,
 );
+
+// Caches the app shell so a primed install reopens offline (REL-04).
+registerServiceWorker();
