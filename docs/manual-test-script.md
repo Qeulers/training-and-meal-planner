@@ -19,6 +19,8 @@ run and passed in the intended environment.
 | Migration `0009` applied and verified locally | **Not done** — needs a local Supabase stack |
 | RPC rollback and RLS negative cases | **Not done** — see §3 |
 | Offline cold reopen | **Not done** — see §1 |
+| Service worker registered and shell cached | **Not done** — production build only, see §1 |
+| Sign-out with pending work | Automated at the component level; end-to-end is §2 item 14 |
 
 ---
 

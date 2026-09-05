@@ -5,6 +5,7 @@ import { NAV_ITEMS } from './navItems';
 import { ThemeToggle } from './ThemeToggle';
 import { useShellStatus } from '@/features/shared/useShellStatus';
 import { SyncStatus } from './SyncStatus';
+import { AccountMenu } from './AccountMenu';
 
 /**
  * Labeled left sidebar for wide screens (≥lg) — the design's iPad-landscape /
@@ -21,7 +22,12 @@ export function SideNav() {
     <SideNavView
       phaseLabel={phaseLabel}
       daysToRace={daysToRace}
-      syncStatus={<SyncStatus className="px-2" />}
+      syncStatus={
+        <>
+          <SyncStatus className="px-2" />
+          <AccountMenu />
+        </>
+      }
     />
   );
 }

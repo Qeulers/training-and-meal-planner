@@ -8,6 +8,7 @@
  * normal fetch churn.
  */
 import { useSyncStatus } from '@/features/shared/useSyncStatus';
+import { useSync } from '@/data/sync/SyncProvider';
 import type { SyncState, SyncTone } from '@/features/shared/syncState';
 
 const DOT: Record<SyncTone, string> = {
@@ -36,6 +37,31 @@ export function SyncStatusView({ state, className = '' }: { state: SyncState; cl
   );
 }
 
+/**
+ * Warns when this browser will not keep work across a reload — private mode,
+ * blocked site data, a database this build cannot read. The app still works for
+ * the session, but nothing may claim to be saved on the device (REL-01).
+ */
+export function StorageWarning({ className = '' }: { className?: string }) {
+  const { ready, durable, quarantined } = useSync();
+  if (!ready || durable) return null;
+  return (
+    <p
+      role="status"
+      className={`rounded-md border border-warning/40 bg-warning/10 px-2 py-1 text-meta text-text-muted ${className}`}
+    >
+      {quarantined
+        ? 'This browser holds data from a newer version of the app. It has been left untouched; changes made now will not be kept after you close the tab.'
+        : 'This browser is not letting the app store data. Changes will not be kept after you close the tab.'}
+    </p>
+  );
+}
+
 export function SyncStatus({ className = '' }: { className?: string }) {
-  return <SyncStatusView state={useSyncStatus()} className={className} />;
+  return (
+    <>
+      <SyncStatusView state={useSyncStatus()} className={className} />
+      <StorageWarning className={className} />
+    </>
+  );
 }

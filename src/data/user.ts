@@ -44,7 +44,16 @@ export function useUserId(): string {
 
 // User data changes, so it must be considered stale (the global default is
 // staleTime: Infinity for immutable reference data).
-const userQ = { staleTime: 0 } as const;
+//
+// Reconnect and focus refetching are re-enabled HERE rather than globally:
+// reference data is immutable at runtime, so refetching all of it every time a
+// phone wakes up would burn a mobile connection for no new information
+// (REL-04).
+const userQ = {
+  staleTime: 0,
+  refetchOnReconnect: true,
+  refetchOnWindowFocus: true,
+} as const;
 
 // ---- Races -----------------------------------------------------------------
 

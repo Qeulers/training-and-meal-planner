@@ -4,8 +4,9 @@ import { queryClient } from '@/data/queryClient';
 import { ThemeProvider } from '@/theme/ThemeProvider';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { SyncStatus } from '@/components/SyncStatus';
+import { AccountMenu } from '@/components/AccountMenu';
 import { AuthProvider, useAuth } from '@/data/AuthProvider';
-import { SyncProvider } from '@/data/sync/SyncProvider';
+import { SyncProvider, useSync } from '@/data/sync/SyncProvider';
 import { BottomNav } from '@/components/BottomNav';
 import { SideNav } from '@/components/SideNav';
 import { SignIn } from '@/features/auth/SignIn';
@@ -30,7 +31,10 @@ function ProtectedShell() {
             </span>
             <SyncStatus />
           </div>
-          <ThemeToggle />
+          <div className="flex shrink-0 items-center gap-1">
+            <AccountMenu compact />
+            <ThemeToggle />
+          </div>
         </div>
       </header>
       <Routes>
@@ -49,11 +53,14 @@ function ProtectedShell() {
 
 function Gate() {
   const { session, loading } = useAuth();
+  const { hydrated } = useSync();
   // DEV-only visual harness for screenshotting components without auth.
   if (import.meta.env.DEV && window.location.pathname === '/preview') {
     return <Preview />;
   }
-  if (loading) {
+  // Wait for the cached data to be restored before rendering the shell,
+  // otherwise a cold offline start flashes empty screens before hydrating.
+  if (loading || !hydrated) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-bg text-text-dim">
         Loading…

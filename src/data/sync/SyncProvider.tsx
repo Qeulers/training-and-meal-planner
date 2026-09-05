@@ -21,7 +21,10 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { persistQueryClientSubscribe, persistQueryClientRestore } from '@tanstack/react-query-persist-client';
 import { openLocalStore } from '../local/idbStore';
+import { CACHE_BUSTER, MAX_CACHE_AGE_MS, createLocalPersister } from './persister';
 import {
   countIntents,
   drain,
@@ -39,6 +42,8 @@ import { useAuth } from '../AuthProvider';
 export interface SyncContextValue {
   /** False while the store is still opening. */
   ready: boolean;
+  /** True once any cached query data has been restored (or found absent). */
+  hydrated: boolean;
   /** False when writes will not survive a reload — never claim "saved" then. */
   durable: boolean;
   /** Existing local data could not be read and was left in place, not deleted. */
@@ -52,6 +57,14 @@ export interface SyncContextValue {
   needsAuth: boolean;
   enqueueOp: (input: Omit<IntentInput, 'owner'>, options?: EnqueueOptions) => Promise<Intent>;
   drainNow: () => Promise<DrainResult | null>;
+  /**
+   * Drop this account's cached server records. Called on explicit sign-out so
+   * the next person at this browser cannot read them (REL-06).
+   *
+   * Queued WRITES are deliberately untouched: cached reads are a convenience
+   * that can be refetched, whereas an unsynced edit exists nowhere else.
+   */
+  forgetCachedData: () => Promise<void>;
 }
 
 const SyncContext = createContext<SyncContextValue | undefined>(undefined);
@@ -71,7 +84,9 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const [counts, setCounts] = useState({ pending: 0, failed: 0 });
   const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
   const [needsAuth, setNeedsAuth] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
   const draining = useRef(false);
+  const queryClient = useQueryClient();
   const send = useMemo(() => makeSender(), []);
 
   useEffect(() => {
@@ -122,6 +137,45 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     }
   }, [store, owner, send, refresh]);
 
+  /*
+   * Restore the cached query data for THIS account, then keep persisting it.
+   *
+   * Restore-before-subscribe matters: subscribing first would immediately write
+   * the empty in-memory cache over the stored one, wiping the offline copy on
+   * every cold start.
+   *
+   * The cache is cleared whenever the account changes, so nothing of the
+   * previous user's is on screen even for a frame (REL-06).
+   */
+  useEffect(() => {
+    if (!store) return;
+    queryClient.clear();
+    setHydrated(false);
+    if (!owner) {
+      setHydrated(true);
+      return;
+    }
+    let unsubscribe: (() => void) | undefined;
+    let cancelled = false;
+    const options = {
+      queryClient,
+      persister: createLocalPersister(store, owner),
+      maxAge: MAX_CACHE_AGE_MS,
+      buster: CACHE_BUSTER,
+    };
+    persistQueryClientRestore(options)
+      .catch(() => undefined)
+      .then(() => {
+        if (cancelled) return;
+        setHydrated(true);
+        unsubscribe = persistQueryClientSubscribe(options);
+      });
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [store, owner, queryClient]);
+
   // Drain when the store opens, on reconnect, and when the tab comes back.
   useEffect(() => {
     if (!store || !owner) return;
@@ -153,9 +207,16 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     [store, owner, refresh, drainNow],
   );
 
+  const forgetCachedData = useCallback(async () => {
+    if (!store || !owner) return;
+    await createLocalPersister(store, owner).removeClient();
+    queryClient.clear();
+  }, [store, owner, queryClient]);
+
   const value = useMemo<SyncContextValue>(
     () => ({
       ready: store != null,
+      hydrated,
       durable,
       quarantined,
       pending: counts.pending,
@@ -165,8 +226,21 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       needsAuth,
       enqueueOp,
       drainNow,
+      forgetCachedData,
     }),
-    [store, durable, quarantined, counts, intents, lastSyncAt, needsAuth, enqueueOp, drainNow],
+    [
+      store,
+      hydrated,
+      durable,
+      quarantined,
+      counts,
+      intents,
+      lastSyncAt,
+      needsAuth,
+      enqueueOp,
+      drainNow,
+      forgetCachedData,
+    ],
   );
 
   return <SyncContext.Provider value={value}>{children}</SyncContext.Provider>;
@@ -179,6 +253,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
  */
 const DETACHED: SyncContextValue = {
   ready: false,
+  hydrated: true,
   durable: false,
   quarantined: false,
   pending: 0,
@@ -188,6 +263,7 @@ const DETACHED: SyncContextValue = {
   needsAuth: false,
   enqueueOp: () => Promise.reject(new Error('No SyncProvider')),
   drainNow: () => Promise.resolve(null),
+  forgetCachedData: () => Promise.resolve(),
 };
 
 // eslint-disable-next-line react-refresh/only-export-components
