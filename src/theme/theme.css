@@ -31,7 +31,7 @@
   /* Text */
   --color-text: #141917;
   --color-text-muted: #556058;
-  --color-text-dim: #6f7a70;
+  --color-text-dim: #677168; /* WCAG AA: 4.60 on bg, 5.05 on surface (was #6f7a70 = 4.08) */
 
   /* Accents & states */
   --color-accent: #3f6b2c;
@@ -51,13 +51,13 @@
 
   --color-text: #eef0ea;
   --color-text-muted: #a3ada5;
-  --color-text-dim: #7c867d;
+  --color-text-dim: #858e85; /* WCAG AA: 4.61 on surface-raised (was #7c867d = 4.14) */
 
   --color-accent: #7fa86b;
   --color-accent-ink: #0e1211;
   --color-success: #7fa86b;
   --color-warning: #d9a02b;
-  --color-danger: #c9553d;
+  --color-danger: #d2705c; /* WCAG AA: 4.61 on surface-raised (was #c9553d = 3.61) */
   --color-food: #8fa0ae;
 }
 

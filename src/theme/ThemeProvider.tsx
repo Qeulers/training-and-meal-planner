@@ -30,10 +30,16 @@ function readStored(): ThemePref {
 }
 
 /**
- * Theme controller (SPEC §8). Preference is stored in localStorage 'theme'
- * (mirrored to user_settings.theme in Phase 6) and the resolved value is applied
- * as a class on <html>. The no-flash boot script in index.html sets the initial
- * class before first paint; this keeps it in sync and follows the OS when 'system'.
+ * Theme controller (SPEC §8, UX-01).
+ *
+ * localStorage stays the source of truth for FIRST PAINT — the boot script in
+ * index.html reads it before React exists, which is what stops the page
+ * flashing the wrong theme — and `useThemeSync` mirrors it to and from
+ * `user_settings.theme` so the choice follows the account to another device.
+ *
+ * The local value deliberately wins on load: a server round trip cannot happen
+ * before paint, and a theme that flickers on every cold start to save one
+ * round trip is a bad trade.
  */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [pref, setPrefState] = useState<ThemePref>(readStored);

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import type React from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
 
 /** Surface card — the primary content container. */
@@ -54,25 +55,60 @@ export function Chip({ children }: { children: ReactNode }) {
 }
 
 /**
- * Segmented control (Food panes). Unlike the round `Pill` filter, the active
- * segment is a raised surface chip — not a green fill — exactly as the mockups
- * render the Fuel/Recipes/Planner/Shop switch.
+ * Segmented control (Food panes). The active segment is a raised surface chip,
+ * not a green fill, exactly as the mockups render the Fuel/Recipes/Planner/Shop
+ * switch — unlike the round `Pill` filter.
+ *
+ * Real tab semantics (A11Y-01).
+ *
+ * It already carried `role="tablist"` and `role="tab"`, but not the behaviour
+ * those roles promise: every tab was in the tab order, arrow keys did nothing,
+ * and no tab pointed at the panel it controls. A screen-reader user was told
+ * "tab" and then found none of the interaction a tab affords.
+ *
+ * Roving tabindex: exactly one tab is focusable, and arrows move between them.
+ * `panelId` wires up `aria-controls`; the panel itself carries `role="tabpanel"`
+ * via `TabPanel` below.
  */
 export function Segmented<K extends string>({
   options,
   value,
   onChange,
   ariaLabel,
+  panelId,
 }: {
   options: { key: K; label: string }[];
   value: K;
   onChange: (k: K) => void;
   ariaLabel?: string;
+  panelId?: string;
 }) {
+  const move = (delta: number) => {
+    const i = options.findIndex((o) => o.key === value);
+    if (i < 0) return;
+    // Wraps, as the tab pattern expects.
+    const next = options[(i + delta + options.length) % options.length];
+    onChange(next.key);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const handlers: Record<string, () => void> = {
+      ArrowRight: () => move(1),
+      ArrowLeft: () => move(-1),
+      Home: () => onChange(options[0].key),
+      End: () => onChange(options[options.length - 1].key),
+    };
+    const handler = handlers[e.key];
+    if (!handler) return;
+    e.preventDefault();
+    handler();
+  };
+
   return (
     <div
       role="tablist"
       aria-label={ariaLabel}
+      onKeyDown={onKeyDown}
       className="flex gap-1 rounded-lg border border-border bg-surface p-1"
     >
       {options.map((o) => {
@@ -81,10 +117,15 @@ export function Segmented<K extends string>({
           <button
             key={o.key}
             role="tab"
+            id={panelId ? `${panelId}-tab-${o.key}` : undefined}
             aria-selected={active}
+            aria-controls={panelId}
+            // Roving tabindex: Tab reaches the group, arrows move within it.
+            tabIndex={active ? 0 : -1}
             onClick={() => onChange(o.key)}
             className={[
               'min-h-tap flex-1 rounded-md px-3 py-1.5 text-body-sm font-display uppercase tracking-label transition-colors duration-fast ease-brand',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
               active
                 ? 'bg-surface-raised text-text shadow-sm ring-1 ring-border-strong'
                 : 'text-text-dim hover:text-text',
@@ -94,6 +135,31 @@ export function Segmented<K extends string>({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/** The panel a `Segmented` controls. Pairs with its `panelId`. */
+export function TabPanel({
+  id,
+  tabKey,
+  children,
+  className = '',
+}: {
+  id: string;
+  tabKey: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      id={id}
+      role="tabpanel"
+      aria-labelledby={`${id}-tab-${tabKey}`}
+      tabIndex={0}
+      className={className}
+    >
+      {children}
     </div>
   );
 }
