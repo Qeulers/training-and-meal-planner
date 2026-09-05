@@ -1,12 +1,22 @@
 /*
  * User data — read + write (SPEC §4.3). Owner scoping is enforced by RLS; every
  * insert carries the session user_id and a client-generated UUID so offline
- * inserts (Phase 5) will not need a round trip. Phase 4 is online-only: writes
- * go straight to Supabase and invalidate the relevant queries.
+ * inserts do not need a round trip.
+ *
+ * Multi-row operations do NOT go through the table API. A workout header and its
+ * sets, and any change to which race is the target, are single transactional
+ * RPCs (migration 0009, TXN-01) — see `rpc.ts`. Writing them as sequential
+ * statements, as this file used to, leaves the server in a half-applied state
+ * when the second one fails: a workout with no sets, or an account with no
+ * target race at all.
+ *
+ * Every such call carries a client-minted operation_id, so retrying an
+ * operation the server already applied is a no-op rather than a duplicate.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
 import { useAuth } from './AuthProvider';
+import { addRaceRpc, saveWorkoutRpc, setRestOverrideRpc, setTargetRaceRpc } from './rpc';
 import type { Tables, TablesInsert } from './database.types';
 
 export type Race = Tables<'races'>;
@@ -60,33 +70,30 @@ type AddRaceInput = Omit<TablesInsert<'races'>, 'id' | 'user_id' | 'is_target'> 
   asTarget?: boolean;
 };
 
+/**
+ * Add a race. Counting existing races, clearing the old target and inserting
+ * happen in one transaction server-side: the first race auto-becomes the A race
+ * and a later one only when ticked (SPEC §6.3), and a failure part-way through
+ * cannot leave the user targetless.
+ */
 export function useAddRace() {
   const userId = useUserId();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ asTarget, ...fields }: AddRaceInput) => {
-      // The first race auto-becomes the A race; otherwise only when explicitly
-      // ticked. Adding a race without ticking must not steal A-race status (SPEC §6.3).
-      const { count } = await supabase.from('races').select('id', { count: 'exact', head: true });
-      const makeTarget = asTarget || (count ?? 0) === 0;
-      if (makeTarget) {
-        // Clear any existing target first to respect races_one_target.
-        const un = await supabase
-          .from('races')
-          .update({ is_target: false })
-          .eq('user_id', userId)
-          .eq('is_target', true);
-        if (un.error) throw un.error;
-      }
-      const row: TablesInsert<'races'> = {
-        ...fields,
-        id: uuid(),
-        user_id: userId,
-        is_target: makeTarget,
-      };
-      const { error } = await supabase.from('races').insert(row);
-      if (error) throw error;
-    },
+    mutationFn: async ({ asTarget, ...fields }: AddRaceInput) =>
+      addRaceRpc({
+        p_operation_id: uuid(),
+        p_race: {
+          id: uuid(),
+          name: fields.name,
+          race_date: fields.race_date,
+          location: fields.location ?? null,
+          distance: fields.distance ?? null,
+          unit: fields.unit ?? null,
+          notes: fields.notes ?? null,
+        },
+        p_as_target: asTarget ?? false,
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['races', userId] }),
   });
 }
@@ -103,22 +110,17 @@ export function useDeleteRace() {
   });
 }
 
-/** Star exactly one race. Unset the current target first to respect the
- *  `races_one_target` partial unique index. */
+/**
+ * Star exactly one race. The `races_one_target` partial unique index means the
+ * old target must be cleared and the new one set together — as two statements
+ * this left no target at all if the second failed.
+ */
 export function useStarRace() {
   const userId = useUserId();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => {
-      const un = await supabase
-        .from('races')
-        .update({ is_target: false })
-        .eq('user_id', userId)
-        .eq('is_target', true);
-      if (un.error) throw un.error;
-      const { error } = await supabase.from('races').update({ is_target: true }).eq('id', id);
-      if (error) throw error;
-    },
+    mutationFn: async (id: string) =>
+      setTargetRaceRpc({ p_operation_id: uuid(), p_race_id: id }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['races', userId] }),
   });
 }
@@ -160,27 +162,22 @@ export function useUpdateSettings() {
 export type RestOverrides = Record<string, number>;
 
 /**
- * Persist a single per-exercise rest default. Reads the current override map
- * first and merges, so setting one exercise never clobbers the others.
+ * Persist a single per-exercise rest default.
+ *
+ * Merged server-side with `jsonb_set`, not read-modify-written here: two devices
+ * setting rest for different exercises would otherwise each write a whole map
+ * and the later one would silently drop the other's key (sync contract §1.2).
  */
 export function useSetRestOverride() {
   const userId = useUserId();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ slug, seconds }: { slug: string; seconds: number }) => {
-      const { data, error: readErr } = await supabase
-        .from('user_settings')
-        .select('rest_overrides')
-        .eq('user_id', userId)
-        .maybeSingle();
-      if (readErr) throw readErr;
-      const current = (data?.rest_overrides ?? {}) as RestOverrides;
-      const next: RestOverrides = { ...current, [slug]: seconds };
-      const { error } = await supabase
-        .from('user_settings')
-        .upsert({ user_id: userId, rest_overrides: next }, { onConflict: 'user_id' });
-      if (error) throw error;
-    },
+    mutationFn: async ({ slug, seconds }: { slug: string; seconds: number }) =>
+      setRestOverrideRpc({
+        p_operation_id: uuid(),
+        p_exercise_slug: slug,
+        p_seconds: seconds,
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['user_settings', userId] }),
   });
 }
@@ -242,33 +239,28 @@ export interface NewWorkout {
   sets: NewSet[];
 }
 
+/**
+ * Save a whole workout as one aggregate. Header and sets commit together, so a
+ * failure between them can no longer leave a logged session with no sets — which
+ * reads as a completed-but-empty workout and silently corrupts tonnage stats.
+ */
 export function useSaveWorkout() {
   const userId = useUserId();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (w: NewWorkout) => {
-      const logId = uuid();
-      const log: TablesInsert<'workout_logs'> = {
-        id: logId,
-        user_id: userId,
-        logged_on: w.logged_on,
-        session_key: w.session_key,
-        session_name: w.session_name,
-        phase_slug: w.phase_slug,
-        notes: w.notes ?? null,
-      };
-      const { error: logErr } = await supabase.from('workout_logs').insert(log);
-      if (logErr) throw logErr;
-      if (w.sets.length) {
-        const rows: TablesInsert<'workout_log_sets'>[] = w.sets.map((s) => ({
+    mutationFn: async (w: NewWorkout) =>
+      saveWorkoutRpc({
+        p_operation_id: uuid(),
+        p_log: {
           id: uuid(),
-          workout_log_id: logId,
-          ...s,
-        }));
-        const { error: setsErr } = await supabase.from('workout_log_sets').insert(rows);
-        if (setsErr) throw setsErr;
-      }
-    },
+          logged_on: w.logged_on,
+          session_key: w.session_key,
+          session_name: w.session_name,
+          phase_slug: w.phase_slug,
+          notes: w.notes ?? null,
+        },
+        p_sets: w.sets,
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['workout_logs', userId] });
       qc.invalidateQueries({ queryKey: ['workout_sets', userId] });
