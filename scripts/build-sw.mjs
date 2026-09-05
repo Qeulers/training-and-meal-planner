@@ -10,7 +10,7 @@
  */
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 
 const DIST = 'dist';
 
@@ -29,10 +29,35 @@ for (const file of files) {
 }
 const buildId = hash.digest('hex').slice(0, 12);
 
+// Everything under /assets is hashed and immutable, so it is safe to precache.
+// Without this the first online visit leaves the cache incomplete — the page's
+// own scripts are requested before the worker claims the client — and offline
+// reopen needs a second visit to work.
+const precache = files
+  .map((f) => '/' + f.slice(DIST.length + 1).split(sep).join('/'))
+  .filter((p) => p.startsWith('/assets/'));
+
 const source = readFileSync(join(DIST, 'sw.js'), 'utf8');
-if (!source.includes('__BUILD_ID__')) {
-  console.error('sw.js has no __BUILD_ID__ placeholder — refusing to ship an unversioned cache.');
+for (const token of ['__BUILD_ID__', '__PRECACHE__']) {
+  if (!source.includes(token)) {
+    console.error(`sw.js has no ${token} placeholder — refusing to ship a broken worker.`);
+    process.exit(1);
+  }
+}
+const stamped = source
+  .replaceAll('__BUILD_ID__', buildId)
+  .replaceAll('__PRECACHE__', JSON.stringify(precache));
+
+// Post-condition. An unsubstituted placeholder is a ReferenceError on install,
+// which kills the worker silently and takes offline support with it — and it is
+// invisible in every test, because the tests never load sw.js. Caught here once,
+// after a stray mention of the token in a comment ate the substitution.
+const leftover = ['__BUILD_ID__', '__PRECACHE__'].filter((t) => stamped.includes(t));
+if (leftover.length) {
+  console.error(`sw.js still contains ${leftover.join(', ')} after substitution.`);
   process.exit(1);
 }
-writeFileSync(join(DIST, 'sw.js'), source.replaceAll('__BUILD_ID__', buildId));
-console.log(`✓ Service worker stamped with build ${buildId} (${files.length} assets)`);
+writeFileSync(join(DIST, 'sw.js'), stamped);
+console.log(
+  `✓ Service worker stamped with build ${buildId} (${precache.length} assets precached)`,
+);

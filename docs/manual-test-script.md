@@ -20,12 +20,69 @@ run and passed in the intended environment.
 | RPC rollback, idempotency, target invariant, unauthenticated | **Passed** against the live database — see §3 |
 | Negative RLS as a *second signed-in account* | **Not done** — needs a second real account, see §3 |
 | Offline cold reopen | **Not done** — see §1 |
-| Service worker registered and shell cached | **Not done** — production build only, see §1 |
+| Service worker + offline cold reopen | **Passed** 2026-09-05 against the production build — found and fixed two defects, see §1 |
+| Real IndexedDB: atomicity, survive reopen, version quarantine | **Passed** 2026-09-05 in Chromium, see §1 |
+| Viewport matrix 320–1440 px at 100% and 200% | **Passed** for the shell and sign-in; authenticated tabs pending, see §4 |
 | Sign-out with pending work | Automated at the component level; end-to-end is §2 item 14 |
 
 ---
 
 ## 1. Durable storage and offline reopen (REL-01, REL-04)
+
+### Results — 2026-09-05, Chromium via Playwright, production build (`vite preview`)
+
+Run by priming with a single online visit, then **killing the server** so the
+origin was genuinely unreachable — a harder test than DevTools offline mode,
+which leaves the origin resolvable.
+
+**Two real defects found and fixed.**
+
+1. **Offline reopen failed for every route except `/`.** `sw.js` filtered *all*
+   requests through `isShellAsset()`, and `/today` is not `/`, does not start
+   with `/assets/` and does not end in `.html` — so navigations fell through to
+   the network and produced the browser's own connection-refused page. `/today`
+   is the default route, so this affected essentially every user. Navigations
+   are now handled first and for every in-app path.
+2. **The shell then loaded but rendered nothing.** With the navigation fixed,
+   `index.html` came from cache but its own JavaScript did not:
+   `Cache.match(request)` keys on request identity, and Vite marks its module
+   script and stylesheet `crossorigin`, so the browser requests them in CORS
+   mode and they never matched entries stored by `cache.addAll()` from plain
+   URL strings. Result: a blank page, offline, with no error a user could act
+   on. Lookups now pass `ignoreVary` and fall back to matching by pathname.
+
+A third, smaller issue: the first online visit left the cache incomplete,
+because a page's sub-resources are requested before the worker claims the
+client, so offline reopen needed *two* visits. The build now injects the hashed
+asset list and precaches it at install, and one visit is enough.
+
+| # | Check | Result |
+| --- | --- | --- |
+| 1 | One online visit primes the shell | **Pass** — 35 entries cached, no shell file missing |
+| 5 | Cold reopen of `/today`, origin unreachable | **Pass** — app boots, renders, zero console errors |
+| 5b | Cold reopen of a route never visited (`/food?pane=shop`, `/stats`) | **Pass** |
+| — | Real IndexedDB round trip via `openLocalStore()` | **Pass** — `durable: true` |
+| — | Transaction that throws leaves nothing behind | **Pass** — prior value intact, partial write absent |
+| — | Two queued intents survive close-and-reopen | **Pass** — order and sequence numbers preserved |
+| — | Drain empties the queue on disk | **Pass** |
+| — | One owner cannot see another's queued work | **Pass** |
+| 10 | On-disk version newer than the build | **Pass** — refused with `VersionError`, and **the queued intent survived**; nothing deleted |
+
+### Still not run
+
+- **1b, storage denial.** Needs a private window or blocked site data, which the
+  automation harness cannot enter. **This remains the single most important
+  unverified check**: if IndexedDB is refused, nothing may claim to be saved on
+  the device.
+- **1c, quota exhaustion.** Deliberately not run: reaching a real browser quota
+  means writing gigabytes to the developer's own disk. The mapping from
+  `QuotaExceededError` to a `quota` failure is covered by unit tests through the
+  in-memory store's fault injection, but the real `DOMException` path is
+  unexercised.
+- **1d, interrupted upgrade.** The version-refusal half is verified above;
+  killing a tab mid-`onupgradeneeded` is not.
+
+### Original procedure
 
 Requires a real browser. Chrome DevTools → Application → Storage.
 
@@ -132,6 +189,15 @@ is irrelevant to a Google-OAuth-only project).
 ---
 
 ## 4. Accessibility and responsive (A11Y-01, UX-A)
+
+### Results — 2026-09-05
+
+| Check | Result |
+| --- | --- |
+| 320 / 390 / 768 / 1024 / 1440 px at 100% and 200% zoom | **Pass** — no horizontal overflow at any of the 10 combinations, on the shell and the sign-in screen |
+| Authenticated tabs at those sizes | **Not run** — auth-gated; needs a signed-in session |
+| Physical phone | **Not run** — emulated viewports are not evidence |
+| Screen reader (VoiceOver) | **Not run** |
 
 Contrast is now automated: `tests/unit/contrast.test.ts` asserts every
 foreground/surface pair in both themes at 4.5:1 and cross-checks the palette
