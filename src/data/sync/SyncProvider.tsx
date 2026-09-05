@@ -40,6 +40,8 @@ import { makeSender } from './operations';
 import { useAuth } from '../AuthProvider';
 
 export interface SyncContextValue {
+  /** The durable store, or null while it is still opening. */
+  store: LocalStore | null;
   /** False while the store is still opening. */
   ready: boolean;
   /** True once any cached query data has been restored (or found absent). */
@@ -215,6 +217,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<SyncContextValue>(
     () => ({
+      store,
       ready: store != null,
       hydrated,
       durable,
@@ -252,6 +255,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
  * nothing can quietly believe it saved.
  */
 const DETACHED: SyncContextValue = {
+  store: null,
   ready: false,
   hydrated: true,
   durable: false,

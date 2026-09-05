@@ -210,9 +210,17 @@ export function useWorkoutLogs() {
   });
 }
 
-/** All of the user's sets with their log's date, for prefill + stats. */
+/**
+ * All of the user's sets with their log's date and creation time, for prefill
+ * and stats.
+ *
+ * `log_created_at` is what separates two workouts logged on the SAME date —
+ * without it, prefill cannot tell a morning session from an evening one and
+ * merges them (WORK-01).
+ */
 export interface SetWithDate extends WorkoutLogSet {
   logged_on: string;
+  log_created_at: string;
 }
 export function useAllSets() {
   const userId = useUserId();
@@ -222,13 +230,17 @@ export function useAllSets() {
     queryFn: async (): Promise<SetWithDate[]> => {
       const { data, error } = await supabase
         .from('workout_log_sets')
-        .select('*, workout_logs!inner(logged_on)');
+        .select('*, workout_logs!inner(logged_on, created_at)');
       if (error) throw error;
       return (data ?? []).map((r) => {
         const { workout_logs, ...set } = r as WorkoutLogSet & {
-          workout_logs: { logged_on: string };
+          workout_logs: { logged_on: string; created_at: string };
         };
-        return { ...set, logged_on: workout_logs.logged_on };
+        return {
+          ...set,
+          logged_on: workout_logs.logged_on,
+          log_created_at: workout_logs.created_at,
+        };
       });
     },
   });
