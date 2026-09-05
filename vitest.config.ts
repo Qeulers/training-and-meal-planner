@@ -11,6 +11,14 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./tests/setup.ts'],
+    // `src/data/supabase.ts` throws at module load without these, and several
+    // test files import it transitively. Supplying placeholders here rather
+    // than in CI keeps `npm test` working on a fresh clone with no .env.local —
+    // the tests never reach the network, so the values only have to exist.
+    env: {
+      VITE_SUPABASE_URL: 'https://test.invalid',
+      VITE_SUPABASE_ANON_KEY: 'test-anon-key',
+    },
     include: ['tests/**/*.test.{ts,tsx}', 'src/**/*.test.{ts,tsx}'],
     coverage: {
       provider: 'v8',
