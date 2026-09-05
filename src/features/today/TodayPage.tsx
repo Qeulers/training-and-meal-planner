@@ -46,8 +46,6 @@ export function TodayPage() {
   const settings = useUserSettings();
   const workoutLogs = useWorkoutLogs();
   const saunaLogs = useSaunaLogs();
-  const recipes = useRecipes();
-  const mealPlan = useMealPlan();
   const allSets = useAllSets();
 
   const [logging, setLogging] = useState<SessionTemplate | null>(null);
@@ -66,8 +64,6 @@ export function TodayPage() {
           settings,
           workoutLogs,
           saunaLogs,
-          recipes,
-          mealPlan,
           allSets,
         ]}
       >
@@ -82,8 +78,6 @@ export function TodayPage() {
           userSettings,
           logList,
           saunaLogList,
-          recipeList,
-          mealPlanList,
           setList,
         ]) => {
           const target = raceList.find((r) => r.is_target) ?? null;
@@ -100,11 +94,6 @@ export function TodayPage() {
           const typeBy = new Map(typeList.map((t) => [t.slug, t]));
           const countdown = raceDate ? daysBetween(today, raceDate) : null;
 
-          // Tonight's planned dinner (glance into the meal plan; no new data).
-          const tonightEntry = mealPlanList.find((e) => e.plan_date === today);
-          const tonightRecipe = tonightEntry
-            ? (recipeList.find((r) => r.slug === tonightEntry.recipe_slug) ?? null)
-            : null;
 
           if (logging) {
             return (
@@ -298,41 +287,74 @@ export function TodayPage() {
                 <AdHocSaunaLog types={typeList} />
               </div>
 
-              {/* Tonight's dinner — links into Food */}
-              {tonightRecipe && (
-                <div>
-                  <Eyebrow bullet className="mb-1">
-                    Tonight
-                  </Eyebrow>
-                  <Link
-                    /*
-                     * Deep-links the actual recipe (FOOD-01). This used to go to
-                     * bare /food, which dropped the user on the Fuel tab with no
-                     * indication of which recipe they had just tapped.
-                     */
-                    to={`/food?pane=recipes&recipe=${encodeURIComponent(tonightRecipe.slug)}`}
-                    className="flex items-center gap-3 rounded-lg border border-border bg-surface p-4 transition-colors hover:border-border-strong"
-                  >
-                    <Icon name="restaurant" size={22} className="shrink-0 text-food" />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-display text-body font-bold text-text">
-                        {tonightRecipe.name}
-                      </p>
-                      <p className="text-meta text-text-dim">
-                        {tonightRecipe.time_minutes} min · {tonightRecipe.diet_tag}
-                        {tonightRecipe.heat_level > 0
-                          ? ` ${HEAT_ICONS[tonightRecipe.heat_level]}`
-                          : ''}
-                      </p>
-                    </div>
-                    <Icon name="chevron_right" size={20} className="shrink-0 text-text-dim" />
-                  </Link>
-                </div>
-              )}
+              {/* Tonight's dinner — its own boundary (UX-01) */}
+              <TonightDinner today={today} />
             </div>
           );
         }}
       </QueryBoundary>
     </TabScaffold>
+  );
+}
+
+/**
+ * Tonight's planned dinner.
+ *
+ * Deliberately loads its own data rather than sharing Today's main boundary:
+ * `QueryBoundary` fails the whole tree on any one error, so a meal-plan or
+ * recipe query that failed used to hide the entire training screen — the part
+ * of the page you actually need at the gym (UX-01).
+ *
+ * Failure here is near-silent by design: a small note, and the rest of Today
+ * stays usable.
+ */
+function TonightDinner({ today }: { today: string }) {
+  const recipes = useRecipes();
+  const mealPlan = useMealPlan();
+
+  if (recipes.isPending || mealPlan.isPending) return null;
+
+  if (recipes.isError || mealPlan.isError) {
+    return (
+      <div>
+        <Eyebrow bullet className="mb-1">
+          Tonight
+        </Eyebrow>
+        <p className="rounded-lg border border-border bg-surface p-4 text-body-sm text-text-dim">
+          Could not load tonight's meal. Everything else on this page is unaffected.
+        </p>
+      </div>
+    );
+  }
+
+  const entry = (mealPlan.data ?? []).find((e) => e.plan_date === today);
+  const recipe = entry ? ((recipes.data ?? []).find((r) => r.slug === entry.recipe_slug) ?? null) : null;
+  if (!recipe) return null;
+
+  return (
+    <div>
+      <Eyebrow bullet className="mb-1">
+        Tonight
+      </Eyebrow>
+      <Link
+        /*
+         * Deep-links the actual recipe (FOOD-01). This used to go to bare
+         * /food, which dropped the user on the Fuel tab with no indication of
+         * which recipe they had just tapped.
+         */
+        to={`/food?pane=recipes&recipe=${encodeURIComponent(recipe.slug)}`}
+        className="flex items-center gap-3 rounded-lg border border-border bg-surface p-4 transition-colors hover:border-border-strong"
+      >
+        <Icon name="restaurant" size={22} className="shrink-0 text-food" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-display text-body font-bold text-text">{recipe.name}</p>
+          <p className="text-meta text-text-dim">
+            {recipe.time_minutes} min · {recipe.diet_tag}
+            {recipe.heat_level > 0 ? ` ${HEAT_ICONS[recipe.heat_level]}` : ''}
+          </p>
+        </div>
+        <Icon name="chevron_right" size={20} className="shrink-0 text-text-dim" />
+      </Link>
+    </div>
   );
 }

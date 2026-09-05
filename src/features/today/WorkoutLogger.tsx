@@ -70,6 +70,19 @@ type Timer =
   | { kind: 'rest'; seconds: number; nonce: number; exerciseSlug?: string }
   | { kind: 'hold'; seconds: number; perSide: boolean; nonce: number };
 
+/**
+ * Scroll to a section, honouring the OS reduced-motion setting (A11Y-01).
+ * A smooth scroll mid-workout is exactly the kind of movement that triggers
+ * vestibular symptoms, and the CSS duration tokens cannot reach this API.
+ */
+function scrollToSection(el: Element | null | undefined) {
+  if (!el) return;
+  const reduced =
+    typeof window !== 'undefined' &&
+    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  el.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
+}
+
 /** Format elapsed seconds as M:SS */
 function fmtElapsed(s: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -148,7 +161,7 @@ export function WorkoutLogger({
     });
   const goNow = (nextIdx: number) => {
     clearTimer();
-    sectionRefs.current[nextIdx]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    scrollToSection(sectionRefs.current[nextIdx]);
   };
 
   // Wall-clock elapsed ticker
@@ -273,7 +286,7 @@ export function WorkoutLogger({
       return { ...prev, [slug]: rows };
     });
     const target = sectionRefs.current[itemIdx + 1] ?? finishRef.current;
-    target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    scrollToSection(target);
   };
 
   // Determine which exercise is "current" (first one that isn't fully done)

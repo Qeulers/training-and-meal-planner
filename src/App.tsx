@@ -7,6 +7,7 @@ import { SyncStatus } from '@/components/SyncStatus';
 import { AccountMenu } from '@/components/AccountMenu';
 import { AuthProvider, useAuth } from '@/data/AuthProvider';
 import { SyncProvider, useSync } from '@/data/sync/SyncProvider';
+import { useThemeSync } from '@/features/shared/useThemeSync';
 import { BottomNav } from '@/components/BottomNav';
 import { SideNav } from '@/components/SideNav';
 import { SignIn } from '@/features/auth/SignIn';
@@ -19,6 +20,9 @@ import { StatsPage } from '@/features/stats/StatsPage';
 import { Preview } from '@/features/dev/Preview';
 
 function ProtectedShell() {
+  // Keeps the theme choice in step with the account, without costing a
+  // first-paint round trip (UX-01).
+  useThemeSync();
   return (
     <div className="min-h-screen bg-bg">
       <SideNav />

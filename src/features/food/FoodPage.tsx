@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { TabScaffold } from '@/components/TabScaffold';
-import { Segmented } from '@/components/ui';
+import { Segmented, TabPanel } from '@/components/ui';
 import { useBasket } from '@/data/user';
 import { DayPicker } from './DayPicker';
 import { FuelPane } from './FuelPane';
@@ -36,14 +36,16 @@ export function FoodPage() {
 
   return (
     <TabScaffold title="Food" wide>
-      {/* Top bar: segmented control + basket chip */}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      {/* Top bar: segmented control + basket chip. Sticky below the header so
+          the segments stay reachable while a long list scrolls (A11Y-01). */}
+      <div className="sticky top-14 z-10 mb-4 flex flex-wrap items-center gap-3 bg-bg/95 py-2 backdrop-blur lg:top-0">
         <div className="flex-1 min-w-0">
           <Segmented
             options={PANES.map((p) => ({ key: p.key, label: p.label }))}
             value={pane}
             onChange={goToPane}
             ariaLabel="Food section"
+            panelId="food-panel"
           />
         </div>
         {basketCount > 0 && (
@@ -60,22 +62,16 @@ export function FoodPage() {
         )}
       </div>
 
-      {pane === 'fuel' && (
-        <div className="mx-auto max-w-content">
-          <FuelPane />
-        </div>
-      )}
-      {pane === 'recipes' && <RecipesPane onPlanForDay={setPlanning} />}
-      {pane === 'planner' && (
-        <div className="mx-auto max-w-content">
-          <PlannerPane />
-        </div>
-      )}
-      {pane === 'shop' && (
-        <div className="mx-auto max-w-content">
-          <ShopPane />
-        </div>
-      )}
+      <TabPanel
+        id="food-panel"
+        tabKey={pane}
+        className={pane === 'recipes' ? '' : 'mx-auto max-w-content'}
+      >
+        {pane === 'fuel' && <FuelPane />}
+        {pane === 'recipes' && <RecipesPane onPlanForDay={setPlanning} />}
+        {pane === 'planner' && <PlannerPane />}
+        {pane === 'shop' && <ShopPane />}
+      </TabPanel>
 
       {/* Dinner-only day picker, wired from a recipe's "Plan for a day". */}
       {planning && (
