@@ -1,15 +1,11 @@
 /*
- * Live sync status (REL-05). Gathers connectivity, auth and query-client
- * activity, and hands them to the pure reducer in `syncState.ts`.
- *
- * Slice 1 scope: `pending` and `failed` are always 0 because there is no outbox
- * yet. When the outbox lands (slice 2) it feeds those two counts in here and
- * every consumer updates for free — deliberately, so the surface is honest from
- * the first release rather than retrofitted.
+ * Live sync status (REL-05). Gathers connectivity, auth, query-client activity
+ * and outbox state, and hands them to the pure reducer in `syncState.ts`.
  */
 import { useEffect, useState } from 'react';
 import { useIsFetching, useIsMutating, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/data/AuthProvider';
+import { useSync } from '@/data/sync/SyncProvider';
 import { deriveSyncState, type SyncState } from './syncState';
 
 const isOnline = () => (typeof navigator === 'undefined' ? true : navigator.onLine !== false);
@@ -28,6 +24,7 @@ function latestSuccess(client: ReturnType<typeof useQueryClient>): number | null
 export function useSyncStatus(): SyncState {
   const client = useQueryClient();
   const { session } = useAuth();
+  const sync = useSync();
   const fetching = useIsFetching();
   const mutating = useIsMutating();
 
@@ -61,12 +58,14 @@ export function useSyncStatus(): SyncState {
   }, []);
 
   void tick;
+  // A parked queue reports as needing auth even though the session object is
+  // still present: the server has already refused it (sync contract §4).
   return deriveSyncState({
     online,
-    authed: !!session,
+    authed: !!session && !sync.needsAuth,
     activeRequests: fetching + mutating,
-    pending: 0,
-    failed: 0,
-    lastSyncAt,
+    pending: sync.pending,
+    failed: sync.failed,
+    lastSyncAt: Math.max(lastSyncAt ?? 0, sync.lastSyncAt ?? 0) || null,
   });
 }

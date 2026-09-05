@@ -5,6 +5,7 @@ import { ThemeProvider } from '@/theme/ThemeProvider';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { SyncStatus } from '@/components/SyncStatus';
 import { AuthProvider, useAuth } from '@/data/AuthProvider';
+import { SyncProvider } from '@/data/sync/SyncProvider';
 import { BottomNav } from '@/components/BottomNav';
 import { SideNav } from '@/components/SideNav';
 import { SignIn } from '@/features/auth/SignIn';
@@ -68,7 +69,10 @@ export function App() {
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <AuthProvider>
-            <Gate />
+            {/* Inside AuthProvider: the outbox stamps and filters by owner. */}
+            <SyncProvider>
+              <Gate />
+            </SyncProvider>
           </AuthProvider>
         </BrowserRouter>
       </QueryClientProvider>
