@@ -19,6 +19,7 @@ Supabase applies migrations in filename order. `0007` is used twice:
 | `0007_add_rest_overrides.sql` | `user_settings.rest_overrides`. Applied **first** (remote version `20260821085609`). |
 | `0007_add_mobility_back_session.sql` | Mobility & lower-back session template. Applied **second** (`20260822185046`). |
 | `0009_transactional_operations.sql` | `operation_receipts` + the transactional RPCs (TXN-01). Applied `2026-09-05`. |
+| `0010_shopping_trips.sql` | `shopping_checks.trip_id`, `user_settings.current_trip_id` / `previous_trip_id` / `diet_prefs`, and `start_new_shop` / `undo_new_shop` (SHOP-02, D-02, D-04). |
 
 Note the two `0007`s were applied in the opposite order to their filename sort
 (`m` < `r` would run mobility first). The remote is the record of what actually
@@ -33,7 +34,7 @@ versions.
 
 ## Numbering
 
-Next number is **`0010`**. `0008` was skipped so no new file could collide with,
+Next number is **`0011`**. `0008` was skipped so no new file could collide with,
 or be confused for, the two `0007`s.
 
 Use `NNNN_snake_case_description.sql`, four digits, zero-padded, one logical
