@@ -133,6 +133,11 @@ is irrelevant to a Google-OAuth-only project).
 
 ## 4. Accessibility and responsive (A11Y-01, UX-A)
 
+Contrast is now automated: `tests/unit/contrast.test.ts` asserts every
+foreground/surface pair in both themes at 4.5:1 and cross-checks the palette
+against `theme.css`. The items below are what automation cannot reach.
+
+
 25. Both themes at 320 / 390 / 768 / 1024 / 1440 px and at 200% zoom.
     - *Expect:* no horizontal clipping; navigation and content reachable.
 26. Keyboard only, whole app: visible focus everywhere, no traps, modals return

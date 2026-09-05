@@ -11,3 +11,4 @@ export * from './prefill';
 export * from './dietPrefs';
 export * from './suggestDinners';
 export * from './recipeSearch';
+export * from './completion';
