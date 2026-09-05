@@ -1,56 +1,243 @@
 {
   "version": "1.0.0",
-  "lastScanned": 1787032851044,
+  "lastScanned": 1788605949259,
   "projectRoot": "/Users/frankkeulers/Code/projects/training-and-meal-planner",
   "techStack": {
-    "languages": [],
-    "frameworks": [],
-    "packageManager": null,
+    "languages": [
+      {
+        "name": "JavaScript/TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "package.json"
+        ]
+      },
+      {
+        "name": "TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "tsconfig.json"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "react",
+        "version": "18.3.1",
+        "category": "frontend"
+      },
+      {
+        "name": "react-dom",
+        "version": "18.3.1",
+        "category": "frontend"
+      },
+      {
+        "name": "vite",
+        "version": "5.4.6",
+        "category": "build"
+      },
+      {
+        "name": "vitest",
+        "version": "2.1.1",
+        "category": "testing"
+      }
+    ],
+    "packageManager": "npm",
     "runtime": null
   },
   "build": {
-    "buildCommand": null,
-    "testCommand": null,
-    "lintCommand": null,
-    "devCommand": null,
-    "scripts": {}
+    "buildCommand": "npm run build",
+    "testCommand": "npm test",
+    "lintCommand": "npm run lint",
+    "devCommand": "npm run dev",
+    "scripts": {
+      "dev": "vite",
+      "build": "tsc -b && vite build",
+      "preview": "vite preview",
+      "typecheck": "tsc -b --noEmit",
+      "lint": "eslint .",
+      "format": "prettier --write .",
+      "test": "vitest run",
+      "test:watch": "vitest",
+      "test:coverage": "vitest run --coverage",
+      "gen:seed": "node scripts/gen-seed-sql.mjs",
+      "update:videos": "node scripts/update-exercise-videos.mjs",
+      "gen:icons": ".venv-fonttools/bin/python scripts/subset-icons.py",
+      "gen:types": "supabase gen types typescript --project-id \"$SUPABASE_PROJECT_ID\" > src/data/database.types.ts"
+    }
   },
   "conventions": {
     "namingStyle": null,
     "importStyle": null,
     "testPattern": null,
-    "fileOrganization": null
+    "fileOrganization": "feature-based"
   },
   "structure": {
     "isMonorepo": false,
     "workspaces": [],
-    "mainDirectories": [],
+    "mainDirectories": [
+      "scripts",
+      "src",
+      "tests"
+    ],
     "gitBranches": {
       "defaultBranch": "main",
       "branchingStrategy": null
     }
   },
   "customNotes": [],
-  "directoryMap": {},
-  "hotPaths": [
-    {
-      "path": "SPEC.md",
-      "accessCount": 5,
-      "lastAccessed": 1787033008764,
-      "type": "file"
+  "directoryMap": {
+    "coverage": {
+      "path": "coverage",
+      "purpose": null,
+      "fileCount": 17,
+      "lastAccessed": 1788605949110,
+      "keyFiles": [
+        "base.css",
+        "block-navigation.js",
+        "dates.ts.html",
+        "favicon.png",
+        "heatBlock.ts.html"
+      ]
     },
-    {
-      "path": "README.md",
-      "accessCount": 1,
-      "lastAccessed": 1787032990122,
-      "type": "file"
+    "data": {
+      "path": "data",
+      "purpose": "Data files",
+      "fileCount": 14,
+      "lastAccessed": 1788605949116,
+      "keyFiles": [
+        "cuisines.json",
+        "exercises.json",
+        "ingredient_categories.json",
+        "phases.json",
+        "pluralisation_exceptions.json"
+      ]
     },
-    {
-      "path": "CLAUDE.md",
-      "accessCount": 1,
-      "lastAccessed": 1787033039301,
-      "type": "file"
+    "dist": {
+      "path": "dist",
+      "purpose": "Distribution/build output",
+      "fileCount": 1,
+      "lastAccessed": 1788605949188,
+      "keyFiles": [
+        "index.html"
+      ]
+    },
+    "legacy": {
+      "path": "legacy",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1788605949188,
+      "keyFiles": [
+        "index.html"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 4,
+      "lastAccessed": 1788605949191,
+      "keyFiles": [
+        "gen-seed-sql.mjs",
+        "subset-icons.py",
+        "update-exercise-videos.mjs",
+        "validate-seed.mjs"
+      ]
+    },
+    "specs": {
+      "path": "specs",
+      "purpose": null,
+      "fileCount": 32,
+      "lastAccessed": 1788605949225,
+      "keyFiles": [
+        " 18.png",
+        "SPEC.md",
+        "Training Planner Design System (standalone).html",
+        "Training Planner Mockups (standalone).html",
+        "Training Planner Mockups-selection 10.png"
+      ]
+    },
+    "src": {
+      "path": "src",
+      "purpose": "Source code",
+      "fileCount": 3,
+      "lastAccessed": 1788605949231,
+      "keyFiles": [
+        "App.tsx",
+        "main.tsx",
+        "vite-env.d.ts"
+      ]
+    },
+    "supabase": {
+      "path": "supabase",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1788605949245,
+      "keyFiles": []
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 1,
+      "lastAccessed": 1788605949249,
+      "keyFiles": [
+        "setup.ts"
+      ]
+    },
+    "dist/assets": {
+      "path": "dist/assets",
+      "purpose": "Static assets",
+      "fileCount": 33,
+      "lastAccessed": 1788605949257,
+      "keyFiles": [
+        "archivo-latin-400-normal-Bl602Mgc.woff",
+        "archivo-latin-400-normal-C81ewxNO.woff2",
+        "archivo-latin-500-normal-CGugC8dq.woff2"
+      ]
+    },
+    "src/components": {
+      "path": "src/components",
+      "purpose": "UI components",
+      "fileCount": 8,
+      "lastAccessed": 1788605949258,
+      "keyFiles": [
+        "BottomNav.tsx",
+        "Icon.tsx",
+        "SideNav.tsx"
+      ]
+    },
+    "src/data": {
+      "path": "src/data",
+      "purpose": "Data files",
+      "fileCount": 6,
+      "lastAccessed": 1788605949258,
+      "keyFiles": [
+        "AuthProvider.tsx",
+        "database.types.ts",
+        "queryClient.ts"
+      ]
+    },
+    "supabase/migrations": {
+      "path": "supabase/migrations",
+      "purpose": "Database migrations",
+      "fileCount": 8,
+      "lastAccessed": 1788605949258,
+      "keyFiles": [
+        "0001_schema.sql",
+        "0002_rls.sql",
+        "0003_seed_reference.sql"
+      ]
+    },
+    "tests/data": {
+      "path": "tests/data",
+      "purpose": "Data files",
+      "fileCount": 1,
+      "lastAccessed": 1788605949259,
+      "keyFiles": [
+        "seed.test.ts"
+      ]
     }
-  ],
+  },
+  "hotPaths": [],
   "userDirectives": []
 }

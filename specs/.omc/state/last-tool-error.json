@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"python3 << 'EOF'\\nimport json\\nimport re\\n\\nwith open(\\\"/Users/frankkeulers/Code/projects/training-and-meal-planner/specs/Training Planner Design System (standalone).html\\\", \\\"r\\\") as f:\\n...",
+  "error": "Exit code 1\nTemplate structure:\nTraceback (most recent call last):\n  File \"<stdin>\", line 14, in <module>\nAttributeError: 'str' object has no attribute 'keys'",
+  "timestamp": "2026-08-24T07:21:42.559Z",
+  "retry_count": 1
+}
