@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { TabScaffold } from '@/components/TabScaffold';
 import { Icon } from '@/components/Icon';
 import {
@@ -26,7 +27,15 @@ import {
   type WorkoutLog,
   type SaunaLog,
 } from '@/data/user';
-import { formatDate, addDays, parseLocalDate, dayOfWeek, daysBetween } from '@/domain/dates';
+import {
+  formatDate,
+  addDays,
+  addMonths,
+  addYears,
+  parseLocalDate,
+  dayOfWeek,
+  daysBetween,
+} from '@/domain/dates';
 import { sessionsFor, type SessionTemplate } from '@/domain/schedule';
 import { saunaFor } from '@/domain/sauna';
 import { WorkoutLogger } from '../today/WorkoutLogger';
@@ -174,10 +183,44 @@ function monthCells(anchor: string): string[] {
 
 // ─── Page ────────────────────────────────────────────────────────────────────
 
+const VIEWS: View[] = ['week', 'month', 'year'];
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Calendar position lives in the URL (`?view=&anchor=&day=`) so a refresh, a
+ * shared link and the browser Back button all land where the user was (CAL-01).
+ * Unparseable values fall back to today's week rather than rendering NaN.
+ */
+function useCalendarState() {
+  const [params, setParams] = useSearchParams();
+  const today = formatDate(new Date());
+
+  const readDate = (key: string) => {
+    const v = params.get(key);
+    return v && DATE_RE.test(v) && !Number.isNaN(parseLocalDate(v).getTime()) ? v : today;
+  };
+  const view = (VIEWS.find((v) => v === params.get('view')) ?? 'week') as View;
+  const anchor = readDate('anchor');
+  const selectedDay = readDate('day');
+
+  const patch = (next: Partial<{ view: View; anchor: string; day: string }>) =>
+    setParams(
+      {
+        view: next.view ?? view,
+        anchor: next.anchor ?? anchor,
+        day: next.day ?? selectedDay,
+      },
+      // Push, so Back returns to the previous week/day (CAL-A).
+      { replace: false },
+    );
+
+  return { view, anchor, selectedDay, patch };
+}
+
 export function CalendarPage() {
-  const [view, setView] = useState<View>('week');
-  const [anchor, setAnchor] = useState(formatDate(new Date()));
-  const [selectedDay, setSelectedDay] = useState<string>(formatDate(new Date()));
+  const { view, anchor, selectedDay, patch } = useCalendarState();
+  const setView = (v: View) => patch({ view: v });
+  const setSelectedDay = (d: string) => patch({ day: d });
   const [logging, setLogging] = useState<SessionTemplate | null>(null);
 
   const phases = usePhases();
@@ -191,14 +234,21 @@ export function CalendarPage() {
   const workoutLogs = useWorkoutLogs();
   const saunaLogs = useSaunaLogs();
 
+  // Step by real calendar units. Stepping by 30/365 days drifted: a month on
+  // from 2027-01-31 landed in March. addMonths/addYears clamp instead (CAL-01).
   const step = (dir: number) => {
-    setAnchor((a) => addDays(a, dir * (view === 'week' ? 7 : view === 'month' ? 30 : 365)));
+    const next =
+      view === 'week'
+        ? addDays(anchor, dir * 7)
+        : view === 'month'
+          ? addMonths(anchor, dir)
+          : addYears(anchor, dir);
+    patch({ anchor: next });
   };
 
   const goToday = () => {
     const today = formatDate(new Date());
-    setAnchor(today);
-    setSelectedDay(today);
+    patch({ anchor: today, day: today });
   };
 
   const VIEW_OPTIONS: { key: View; label: string }[] = [
@@ -343,7 +393,14 @@ export function CalendarPage() {
                   onStartSession={setLogging}
                 />
               )}
-              {view === 'month' && <MonthView anchor={anchor} ctx={ctx} />}
+              {view === 'month' && (
+                <MonthView
+                  anchor={anchor}
+                  ctx={ctx}
+                  selectedDay={selectedDay}
+                  onSelectDay={(d) => patch({ view: 'week', anchor: d, day: d })}
+                />
+              )}
               {view === 'year' && <YearView anchor={anchor} ctx={ctx} raceList={raceList} />}
             </div>
           );
@@ -482,7 +539,7 @@ function WeekView({
                       <DayRow
                         shape="circle"
                         color="text-success"
-                        bgColor="bg-success"
+                        tone="success"
                         label="Race day"
                         bold
                       />
@@ -492,7 +549,7 @@ function WeekView({
                         key={s.slug}
                         shape="square"
                         color="text-accent"
-                        bgColor="bg-accent"
+                        tone="accent"
                         label={s.name}
                         meta={s.duration_label}
                         done={s.status === 'done'}
@@ -504,7 +561,7 @@ function WeekView({
                         key={l.id}
                         shape="square"
                         color="text-accent"
-                        bgColor="bg-accent"
+                        tone="accent"
                         label={l.session_name}
                         done
                       />
@@ -516,7 +573,7 @@ function WeekView({
                           key={slot.slot_key}
                           shape="triangle"
                           color="text-warning"
-                          bgColor="bg-warning"
+                          tone="warning"
                           label={t?.name ?? 'Sauna'}
                           meta={slot.is_optional ? 'optional' : undefined}
                           dim={slot.is_optional && !slot.done}
@@ -531,7 +588,7 @@ function WeekView({
                           key={l.id}
                           shape="triangle"
                           color="text-warning"
-                          bgColor="bg-warning"
+                          tone="warning"
                           label={t?.name ?? 'Sauna'}
                           done
                         />
@@ -580,7 +637,7 @@ function WeekView({
 function DayRow({
   shape,
   color,
-  bgColor,
+  tone,
   label,
   meta,
   bold = false,
@@ -590,7 +647,7 @@ function DayRow({
 }: {
   shape: 'circle' | 'square' | 'triangle';
   color: string;
-  bgColor: string;
+  tone: Tone;
   label: string;
   meta?: string;
   bold?: boolean;
@@ -600,7 +657,7 @@ function DayRow({
 }) {
   return (
     <div className={`flex items-center gap-2 ${dim ? 'opacity-60' : ''}`}>
-      <ActivityShape shape={shape} bgColor={bgColor} size="sm" />
+      <ActivityShape shape={shape} tone={tone} size="sm" />
       <span
         className={`truncate text-body-sm ${
           bold ? 'font-bold text-text' : missed && !done ? 'text-danger' : color
@@ -623,29 +680,48 @@ function DayRow({
 
 // ─── ActivityShape: ● ■ ▲ for a11y ────────────────────────────────────────────
 
+type Tone = 'success' | 'accent' | 'warning';
+// Full literal class names — Tailwind cannot see interpolated ones.
+const TONE_TEXT: Record<Tone, string> = {
+  success: 'text-success',
+  accent: 'text-accent',
+  warning: 'text-warning',
+};
+
+/**
+ * Activity marker. `variant` carries meaning that colour alone must not
+ * (A11Y-01): a solid shape is completed, an outlined one is only scheduled.
+ * Drawn as SVG so the triangle can be outlined like the other two.
+ */
 function ActivityShape({
   shape,
-  bgColor,
+  tone,
   size = 'sm',
+  variant = 'filled',
 }: {
   shape: 'circle' | 'square' | 'triangle';
-  bgColor: string;
+  tone: Tone;
   size?: 'sm' | 'md';
+  variant?: 'filled' | 'outline';
 }) {
-  const dim = size === 'md' ? 'h-2.5 w-2.5' : 'h-2 w-2';
-  if (shape === 'circle') {
-    return <i className={`${dim} shrink-0 rounded-full ${bgColor}`} aria-hidden />;
-  }
-  if (shape === 'square') {
-    return <i className={`${dim} shrink-0 rounded-[2px] ${bgColor}`} aria-hidden />;
-  }
-  // triangle via clip-path
+  const px = size === 'md' ? 10 : 8;
+  const filled = variant === 'filled';
+  const paint = filled
+    ? { fill: 'currentColor', stroke: 'none' }
+    : { fill: 'none', stroke: 'currentColor', strokeWidth: 2 };
   return (
-    <i
-      className={`${dim} shrink-0 ${bgColor}`}
-      style={{ clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }}
+    <svg
+      width={px}
+      height={px}
+      viewBox="0 0 12 12"
+      className={`shrink-0 ${TONE_TEXT[tone]}`}
       aria-hidden
-    />
+      focusable="false"
+    >
+      {shape === 'circle' && <circle cx="6" cy="6" r="5" {...paint} />}
+      {shape === 'square' && <rect x="1" y="1" width="10" height="10" rx="1.5" {...paint} />}
+      {shape === 'triangle' && <polygon points="6,1 11,11 1,11" {...paint} />}
+    </svg>
   );
 }
 
@@ -703,7 +779,7 @@ function DayDetail({ dateStr, activity, ctx, typeBy, exBy, itemList, onStartSess
       {race && (
         <Card className="border-success/50 bg-success/5">
           <div className="flex items-center gap-2">
-            <ActivityShape shape="circle" bgColor="bg-success" size="md" />
+            <ActivityShape shape="circle" tone="success" size="md" />
             <Heading>Race Day</Heading>
           </div>
           {ctx.raceDate && (
@@ -889,7 +965,14 @@ function SessionStatusBadge({ status }: { status: SessionStatus }) {
 
 // ─── MonthView ────────────────────────────────────────────────────────────────
 
-function MonthView({ anchor, ctx }: { anchor: string; ctx: Ctx }) {
+interface MonthViewProps {
+  anchor: string;
+  ctx: Ctx;
+  selectedDay: string;
+  onSelectDay: (dateStr: string) => void;
+}
+
+function MonthView({ anchor, ctx, selectedDay, onSelectDay }: MonthViewProps) {
   const cells = monthCells(anchor);
   const month = parseLocalDate(anchor).getMonth();
   const today = formatDate(new Date());
@@ -915,11 +998,12 @@ function MonthView({ anchor, ctx }: { anchor: string; ctx: Ctx }) {
 
   return (
     <div>
-      {/* Legend top-right */}
-      <div className="mb-3 flex items-center justify-end gap-4">
-        <MonthLegendItem shape="circle" bgColor="bg-success" label="race" />
-        <MonthLegendItem shape="square" bgColor="bg-accent" label="strength" />
-        <MonthLegendItem shape="triangle" bgColor="bg-warning" label="sauna" />
+      {/* Legend top-right — shape carries the activity, fill carries completion. */}
+      <div className="mb-3 flex flex-wrap items-center justify-end gap-x-4 gap-y-1">
+        <MonthLegendItem shape="circle" tone="success" label="race" />
+        <MonthLegendItem shape="square" tone="accent" label="strength" />
+        <MonthLegendItem shape="triangle" tone="warning" label="sauna" />
+        <span className="text-meta text-text-dim">solid = done · outline = scheduled</span>
       </div>
 
       {/* Weekday headers */}
@@ -936,52 +1020,83 @@ function MonthView({ anchor, ctx }: { anchor: string; ctx: Ctx }) {
         {cells.map((d) => {
           const inMonth = parseLocalDate(d).getMonth() === month;
           const isToday = d === today;
+          const isSelected = d === selectedDay;
           const { sessions, slots, heat, race, loggedSessions, loggedSaunas } = activityFor(d, ctx);
-          const hasStrength = sessions.length > 0 || loggedSessions.length > 0;
-          const hasSauna = slots.length > 0 || loggedSaunas.length > 0;
+
+          // Scheduled vs completed are distinguished by fill, not colour, and
+          // spelled out in the label for screen readers (CAL-01 / A11Y-01).
+          const strengthDone = loggedSessions.length > 0 || sessions.some((x) => x.status === 'done');
+          const strengthPlanned = sessions.length > 0;
+          const saunaDone = loggedSaunas.length > 0;
+          const saunaPlanned = slots.length > 0;
+
+          const notes: string[] = [];
+          if (race) notes.push('race day');
+          if (strengthDone) notes.push('strength completed');
+          else if (strengthPlanned) notes.push('strength scheduled');
+          if (saunaDone) notes.push('sauna completed');
+          else if (saunaPlanned) notes.push('sauna scheduled');
+          if (heat) notes.push('heat block');
+          const label = [
+            parseLocalDate(d).toLocaleDateString(undefined, {
+              weekday: 'long',
+              day: 'numeric',
+              month: 'long',
+              year: 'numeric',
+            }),
+            notes.length ? notes.join(', ') : 'nothing scheduled',
+            // Selection is stated in words: these buttons navigate rather than
+            // toggle, so aria-pressed would misdescribe them.
+            isSelected ? 'selected' : null,
+          ]
+            .filter(Boolean)
+            .join('. ');
 
           return (
-            <div
+            <button
               key={d}
+              type="button"
+              onClick={() => onSelectDay(d)}
+              aria-label={label}
+              aria-current={isToday ? 'date' : undefined}
               className={[
                 'flex aspect-square flex-col items-center justify-between rounded-md border p-1',
+                'transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2',
+                'focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-bg',
                 race
                   ? 'border-success/60 bg-success/20 text-text'
                   : heat && inMonth
                     ? 'border-danger/30 bg-danger/10 text-text'
                     : inMonth
-                      ? 'border-border bg-surface text-text'
-                      : 'border-transparent text-text-dim',
-                isToday ? 'ring-1 ring-inset ring-accent' : '',
-                !inMonth ? 'opacity-30' : '',
+                      ? 'border-border bg-surface text-text hover:border-border-strong'
+                      : 'border-transparent text-text-dim hover:border-border',
+                isSelected ? 'ring-2 ring-inset ring-accent' : '',
+                isToday && !isSelected ? 'ring-1 ring-inset ring-accent' : '',
+                !inMonth ? 'opacity-40' : '',
               ].join(' ')}
             >
               <span className="self-start text-meta leading-none">
                 {parseLocalDate(d).getDate()}
               </span>
-              {/* Shape markers bottom */}
+              {/* Shape markers bottom — solid = done, outline = scheduled. */}
               <span className="flex items-center gap-0.5">
-                {race && (
-                  <i
-                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-success"
-                    aria-label="race"
+                {race && <ActivityShape shape="circle" tone="success" />}
+                {(strengthDone || strengthPlanned) && (
+                  <ActivityShape
+                    shape="square"
+                    tone="accent"
+                    variant={strengthDone ? 'filled' : 'outline'}
                   />
                 )}
-                {hasStrength && (
-                  <i
-                    className="h-1.5 w-1.5 shrink-0 rounded-[1px] bg-accent"
-                    aria-label="strength"
-                  />
-                )}
-                {hasSauna && (
-                  <i
-                    className="h-1.5 w-1.5 shrink-0 bg-warning"
-                    style={{ clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }}
-                    aria-label="sauna"
+                {(saunaDone || saunaPlanned) && (
+                  <ActivityShape
+                    shape="triangle"
+                    tone="warning"
+                    variant={saunaDone ? 'filled' : 'outline'}
                   />
                 )}
               </span>
-            </div>
+            </button>
           );
         })}
       </div>
@@ -989,10 +1104,7 @@ function MonthView({ anchor, ctx }: { anchor: string; ctx: Ctx }) {
       {/* Heat-block summary bar */}
       {hb && (
         <div className="mt-4 flex items-center gap-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2">
-          <i
-            className="h-2 w-2 shrink-0 rounded-full bg-success"
-            aria-label="race marker"
-          />
+          <ActivityShape shape="circle" tone="success" size="md" />
           <p className="text-body-sm text-text-muted">
             Heat block {fmtShort(hb.start)} – {fmtShort(hb.end)}
             {blockSessions > 0 ? ` · ${blockSessions} sessions` : ''}
@@ -1007,16 +1119,16 @@ function MonthView({ anchor, ctx }: { anchor: string; ctx: Ctx }) {
 
 function MonthLegendItem({
   shape,
-  bgColor,
+  tone,
   label,
 }: {
   shape: 'circle' | 'square' | 'triangle';
-  bgColor: string;
+  tone: Tone;
   label: string;
 }) {
   return (
     <span className="flex items-center gap-1.5">
-      <ActivityShape shape={shape} bgColor={bgColor} size="sm" />
+      <ActivityShape shape={shape} tone={tone} size="sm" />
       <span className="font-display text-label uppercase tracking-label text-text-dim">
         {label}
       </span>

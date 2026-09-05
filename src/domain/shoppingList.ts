@@ -45,7 +45,11 @@ export interface Category {
 }
 
 export interface ShoppingItem {
-  /** Stable key: normalised 'name|category_code' — matches shopping_checks.item_key. */
+  /**
+   * Stable key matching `shopping_checks.item_key`: normalised
+   * 'name|category_code' for recipe lines, prefixed 'staple:' for pantry
+   * staples so the two never share a tick (SHOP-01).
+   */
   item_key: string;
   ingredient_name: string;
   category_code: string;
@@ -135,6 +139,9 @@ export function aggregate({
     is_staple: boolean;
   }
   const acc = new Map<string, Acc>();
+  // The map key IS the emitted item_key (SHOP-01): staples carry a 'staple:'
+  // namespace so a recipe's eggs and the pantry staple eggs are separately
+  // checkable. Re-deriving the key from name+category here would collapse them.
 
   for (const r of recipes) {
     for (const ing of r.ingredients) {
@@ -171,14 +178,14 @@ export function aggregate({
 
   return sortedCats
     .map((cat) => {
-      const items: ShoppingItem[] = [...acc.values()]
-        .filter((e) => e.category_code === cat.code)
+      const items: ShoppingItem[] = [...acc.entries()]
+        .filter(([, e]) => e.category_code === cat.code)
         .sort(
-          (a, b) =>
+          ([, a], [, b]) =>
             (a.is_staple ? 1 : 0) - (b.is_staple ? 1 : 0) || a.name.localeCompare(b.name),
         )
-        .map((e) => ({
-          item_key: itemKey(e.name, e.category_code),
+        .map(([key, e]) => ({
+          item_key: key,
           ingredient_name: e.name,
           category_code: e.category_code,
           quantity_text: e.is_staple ? e.quantities[0] : combineQty(e.quantities, exceptions),

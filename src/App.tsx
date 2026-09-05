@@ -3,6 +3,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '@/data/queryClient';
 import { ThemeProvider } from '@/theme/ThemeProvider';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { SyncStatus } from '@/components/SyncStatus';
 import { AuthProvider, useAuth } from '@/data/AuthProvider';
 import { BottomNav } from '@/components/BottomNav';
 import { SideNav } from '@/components/SideNav';
@@ -21,10 +22,13 @@ function ProtectedShell() {
       <SideNav />
       {/* Mobile / tablet-portrait top bar (the sidebar carries brand + theme at ≥lg). */}
       <header className="sticky top-0 z-10 border-b border-border bg-bg/90 backdrop-blur lg:hidden">
-        <div className="mx-auto flex max-w-content items-center justify-between px-4 py-2">
-          <span className="font-display text-body-sm font-bold uppercase tracking-label text-text-dim">
-            Training &amp; Meal Planner
-          </span>
+        <div className="mx-auto flex max-w-content items-center justify-between gap-3 px-4 py-2">
+          <div className="min-w-0">
+            <span className="block truncate font-display text-body-sm font-bold uppercase tracking-label text-text-dim">
+              Training &amp; Meal Planner
+            </span>
+            <SyncStatus />
+          </div>
           <ThemeToggle />
         </div>
       </header>

@@ -48,3 +48,26 @@ export function daysBetween(a: DateStr, b: DateStr): number {
     (parseLocalDate(b).getTime() - parseLocalDate(a).getTime()) / 86_400_000,
   );
 }
+
+/**
+ * Add `n` calendar months (may be negative), clamping to the destination
+ * month's last day: 2027-01-31 + 1 month is 2027-02-28, not 2027-03-02.
+ *
+ * `Date.setMonth` overflows instead of clamping, so the day is set to 1 first
+ * and restored afterwards against the real length of the target month.
+ */
+export function addMonths(dateStr: DateStr, n: number): DateStr {
+  const d = parseLocalDate(dateStr);
+  const day = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + n);
+  // Day 0 of the following month = the last day of this one.
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(day, lastDay));
+  return formatDate(d);
+}
+
+/** Add `n` calendar years (may be negative). 29 Feb clamps to 28 Feb. */
+export function addYears(dateStr: DateStr, n: number): DateStr {
+  return addMonths(dateStr, n * 12);
+}
