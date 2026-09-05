@@ -16,8 +16,9 @@ run and passed in the intended environment.
 | Gate | Status |
 | --- | --- |
 | `npm test` / `typecheck` / `lint` / `build` / `test:coverage` / `validate-seed` | Automated, in CI |
-| Migration `0009` applied and verified locally | **Not done** — needs a local Supabase stack |
-| RPC rollback and RLS negative cases | **Not done** — see §3 |
+| Migration `0009` applied | **Done** — 2026-09-05, direct to production, no local rehearsal |
+| RPC rollback, idempotency, target invariant, unauthenticated | **Passed** against the live database — see §3 |
+| Negative RLS as a *second signed-in account* | **Not done** — needs a second real account, see §3 |
 | Offline cold reopen | **Not done** — see §1 |
 | Service worker registered and shell cached | **Not done** — production build only, see §1 |
 | Sign-out with pending work | Automated at the component level; end-to-end is §2 item 14 |
@@ -92,38 +93,41 @@ Requires a real browser. Chrome DevTools → Application → Storage.
 
 ## 3. Server-side transactions and RLS (TXN-01)
 
-**Blocked on a local Supabase stack.** Docker and the `supabase` CLI are both
-installed on this machine but no local stack is initialised, so migration `0009`
-has been reviewed but never executed. Until this section runs, the RPCs are
-unverified code.
+Migration `0009` was applied straight to production on **2026-09-05** with
+explicit approval and no local rehearsal. It is additive — one new table plus
+five functions, no existing table altered — so the blast radius was small, but
+the sequencing is recorded honestly: review, then apply, then verify.
 
-When a stack exists (`supabase init && supabase start && supabase db reset`):
+Verification ran against the **live** database immediately afterwards, with a
+real user id and JWT claim, inside blocks that raised at the end to force a
+rollback. Confirmed afterwards: zero leftover rows in `workout_logs`, `races`,
+`operation_receipts` and `user_settings`.
 
-16. **Rollback.** Call `save_workout` with a set referencing a non-existent
-    `exercise_slug`.
-    - *Expect:* the FK violation rolls back the header too. `workout_logs` gains
-      no row.
-17. **Idempotency.** Call `save_workout` twice with the same `p_operation_id`.
-    - *Expect:* one log, one set of sets, second call returns `duplicate: true`.
-18. **Target invariant.** Call `set_target_race` repeatedly and concurrently.
-    - *Expect:* exactly one `is_target` row at all times; `races_one_target` is
-      never violated and never leaves zero targets.
-19. **First race auto-targets.** `add_race` with `p_as_target = false` on an
-    empty account.
-    - *Expect:* `is_target = true` (SPEC §6.3).
-20. **Negative RLS — unauthenticated.** Call each RPC with the anon key.
-    - *Expect:* `not authenticated`, no rows written.
-21. **Negative RLS — wrong owner.** As user B, call `set_target_race` with user
-    A's race id.
-    - *Expect:* `race not found`. B must not learn whether the id exists.
-22. **Receipt isolation.** As user B, replay user A's `operation_id`.
-    - *Expect:* treated as a fresh operation for B (or refused), never returning
-      A's result.
-23. **Field-level merge.** Call `set_rest_override` for two different exercises
-    from two sessions.
-    - *Expect:* both keys present in `rest_overrides`.
-24. **Rest validation.** `set_rest_override` with `-1`.
-    - *Expect:* rejected, no row written.
+| # | Check | Result |
+| --- | --- | --- |
+| 16 | `save_workout` with a set referencing a non-existent `exercise_slug` | **Pass** — raised; zero orphan headers, so the FK violation rolled the header back too |
+| 17 | `save_workout` twice with the same `p_operation_id` | **Pass** — first: `duplicate=false`, +1 log, 2 sets. Replay: `duplicate=true`, still +1 log total |
+| 18 | `set_target_race` | **Pass** — exactly 1 `is_target` row afterwards |
+| 19 | `add_race` with `p_as_target=false` while races already exist | **Pass** — `is_target=false`; it did not steal A-race status |
+| 20 | Every RPC with no JWT claim | **Pass** — `save_workout` and `add_race` both raised `not authenticated` |
+| 21 | `set_target_race` with an id the caller does not own | **Pass** — raised `race not found` |
+| 23 | `set_rest_override` for two different exercises, separate calls | **Pass** — both keys present (`ex_one=120`, `ex_two=45`), so the `jsonb_set` merge does not clobber |
+| 24 | `set_rest_override` with `-1` | **Pass** — rejected |
+
+Also clean: `get_advisors(security)` reports no findings on the new table or
+functions (the single pre-existing warning is leaked-password protection, which
+is irrelevant to a Google-OAuth-only project).
+
+### Still not verified
+
+25. **Negative RLS from a second signed-in account** (original items 21–22 in
+    full). The checks above prove the RPCs' own owner guards, but not that RLS
+    refuses a *different authenticated user* — that needs a second real account.
+    - *Expect:* user B calling `set_target_race` with user A's race id gets
+      `race not found` and cannot tell whether the id exists; replaying A's
+      `operation_id` never returns A's result.
+26. **Concurrent `set_target_race`** from two sessions at once.
+    - *Expect:* `races_one_target` never violated, never zero targets.
 
 ---
 

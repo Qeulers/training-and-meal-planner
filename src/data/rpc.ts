@@ -1,24 +1,24 @@
 /*
  * Typed wrappers for the transactional endpoints in migration 0009 (TXN-01).
  *
- * `database.types.ts` is generated and currently declares no functions, because
- * 0009 has not been applied to the remote project — generating types from an
- * unapplied migration is not possible, and hand-editing the generated file is
- * forbidden (MIG-01). So the argument and result shapes are declared here, at a
- * single explicit cast boundary, mirroring the pattern `reference.ts` already
- * uses for its dynamic `from()` call.
- *
- * When 0009 is applied and `npm run gen:types` is re-run, the casts below become
- * redundant and should be deleted rather than left to rot.
+ * The argument names are checked against the generated `Functions` types, so a
+ * signature change in a later migration breaks the build here rather than at
+ * runtime. Return shapes are still declared by hand: the functions return jsonb,
+ * which the generator can only describe as `Json`.
  */
 import { supabase } from './supabase';
+import type { Database } from './database.types';
+
+type Fns = Database['public']['Functions'];
+/** Compile-time check that a wrapper's arguments match the deployed function. */
+type ArgsOf<K extends keyof Fns> = Fns[K]['Args'];
 
 /** Every endpoint reports whether this operation_id had already been applied. */
 export interface RpcResult {
   duplicate: boolean;
 }
 
-export interface SaveWorkoutArgs {
+export interface SaveWorkoutArgs extends ArgsOf<'save_workout'> {
   p_operation_id: string;
   p_log: {
     id?: string;
@@ -34,7 +34,7 @@ export interface SaveWorkoutResult extends RpcResult {
   workout_log_id: string;
 }
 
-export interface AddRaceArgs {
+export interface AddRaceArgs extends ArgsOf<'add_race'> {
   p_operation_id: string;
   p_race: {
     id?: string;
@@ -52,7 +52,7 @@ export interface AddRaceResult extends RpcResult {
   is_target: boolean;
 }
 
-export interface SetTargetRaceArgs {
+export interface SetTargetRaceArgs extends ArgsOf<'set_target_race'> {
   p_operation_id: string;
   p_race_id: string;
 }
@@ -60,7 +60,7 @@ export interface SetTargetRaceResult extends RpcResult {
   race_id: string;
 }
 
-export interface SetRestOverrideArgs {
+export interface SetRestOverrideArgs extends ArgsOf<'set_rest_override'> {
   p_operation_id: string;
   p_exercise_slug: string;
   p_seconds: number;
@@ -70,20 +70,20 @@ export interface SetRestOverrideResult extends RpcResult {
   seconds: number;
 }
 
-/** The single place untyped `rpc()` is called. */
-async function call<T>(name: string, args: object): Promise<T> {
-  const { data, error } = await supabase.rpc(name as never, args as never);
+/** The single place the jsonb return value is given a shape. */
+async function call<K extends keyof Fns, T>(name: K, args: ArgsOf<K>): Promise<T> {
+  const { data, error } = await supabase.rpc(name, args as never);
   if (error) throw error;
   return data as T;
 }
 
 export const saveWorkoutRpc = (args: SaveWorkoutArgs) =>
-  call<SaveWorkoutResult>('save_workout', args);
+  call<'save_workout', SaveWorkoutResult>('save_workout', args);
 
-export const addRaceRpc = (args: AddRaceArgs) => call<AddRaceResult>('add_race', args);
+export const addRaceRpc = (args: AddRaceArgs) => call<'add_race', AddRaceResult>('add_race', args);
 
 export const setTargetRaceRpc = (args: SetTargetRaceArgs) =>
-  call<SetTargetRaceResult>('set_target_race', args);
+  call<'set_target_race', SetTargetRaceResult>('set_target_race', args);
 
 export const setRestOverrideRpc = (args: SetRestOverrideArgs) =>
-  call<SetRestOverrideResult>('set_rest_override', args);
+  call<'set_rest_override', SetRestOverrideResult>('set_rest_override', args);

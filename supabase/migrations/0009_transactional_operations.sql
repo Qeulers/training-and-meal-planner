@@ -19,8 +19,10 @@
 -- so the policies remain the single security boundary. search_path is pinned and
 -- everything is schema-qualified, per the convention in 0001.
 --
--- NOT APPLIED REMOTELY. Applying this to the live project is a separate,
--- explicitly approved step (spec §12).
+-- Applied to the live project on 2026-09-05 with explicit approval (spec §12),
+-- after review but WITHOUT a local rehearsal — no local stack existed. It was
+-- verified immediately afterwards against the live database, inside transactions
+-- that were rolled back: see docs/manual-test-script.md §3 for the results.
 
 begin;
 

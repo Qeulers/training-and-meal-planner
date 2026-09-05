@@ -16,17 +16,25 @@ Supabase applies migrations in filename order. `0007` is used twice:
 | `0004_add_rest_seconds.sql` | `exercises.rest_seconds`. |
 | `0005_update_exercise_videos.sql` | Video URL corrections. |
 | `0006_swap_trxrow_for_csrow.sql` | Exercise swap. |
-| `0007_add_mobility_back_session.sql` | Mobility & lower-back session template. |
-| `0007_add_rest_overrides.sql` | `user_settings.rest_overrides`. Sorts **after** the line above (`m` < `r`), which is the order it was applied in. |
+| `0007_add_rest_overrides.sql` | `user_settings.rest_overrides`. Applied **first** (remote version `20260821085609`). |
+| `0007_add_mobility_back_session.sql` | Mobility & lower-back session template. Applied **second** (`20260822185046`). |
+| `0009_transactional_operations.sql` | `operation_receipts` + the transactional RPCs (TXN-01). Applied `2026-09-05`. |
+
+Note the two `0007`s were applied in the opposite order to their filename sort
+(`m` < `r` would run mobility first). The remote is the record of what actually
+happened — `supabase_migrations.schema_migrations`, reproduced above — not the
+filenames. A from-scratch `supabase db reset` will replay them in filename
+order, which is harmless here because the two are independent, but do not assume
+that in general.
 
 The duplicate number is left alone deliberately: both files are applied, and
-renaming either one would make the local set disagree with
-`supabase_migrations.schema_migrations` on the remote.
+renaming either would make the local set disagree with the remote's recorded
+versions.
 
 ## Numbering
 
-Next number is **`0009`** — `0008` is skipped so no new file can ever collide
-with, or be confused for, the two `0007`s.
+Next number is **`0010`**. `0008` was skipped so no new file could collide with,
+or be confused for, the two `0007`s.
 
 Use `NNNN_snake_case_description.sql`, four digits, zero-padded, one logical
 change per file.

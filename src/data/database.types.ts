@@ -171,6 +171,30 @@ export type Database = {
           },
         ]
       }
+      operation_receipts: {
+        Row: {
+          created_at: string
+          op: string
+          operation_id: string
+          result: Json
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          op: string
+          operation_id: string
+          result?: Json
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          op?: string
+          operation_id?: string
+          result?: Json
+          user_id?: string
+        }
+        Relationships: []
+      }
       phases: {
         Row: {
           goal: string
@@ -758,7 +782,28 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      add_race: {
+        Args: { p_as_target?: boolean; p_operation_id: string; p_race: Json }
+        Returns: Json
+      }
+      prune_operation_receipts: { Args: never; Returns: number }
+      require_uid: { Args: never; Returns: string }
+      save_workout: {
+        Args: { p_log: Json; p_operation_id: string; p_sets?: Json }
+        Returns: Json
+      }
+      set_rest_override: {
+        Args: {
+          p_exercise_slug: string
+          p_operation_id: string
+          p_seconds: number
+        }
+        Returns: Json
+      }
+      set_target_race: {
+        Args: { p_operation_id: string; p_race_id: string }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never
